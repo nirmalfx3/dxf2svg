@@ -9,3 +9,5 @@ build/
 *.svg
 !examples/*.svg
 .claude/
+.venv/
+.vite/
