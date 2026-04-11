@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DXF → SVG Converter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d0f14;
+    --surface:   #161921;
+    --surface2:  #1e2330;
+    --border:    #2a3040;
+    --accent:    #00d4aa;
+    --accent2:   #4d7cff;
+    --warn:      #ff6b35;
+    --text:      #e2e8f0;
+    --text-dim:  #64748b;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--text-dim); }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+  header .spacer { flex: 1; }
+  .cmd-hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--surface2);
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  /* ── Main Layout ── */
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr 300px;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left Panel: Controls ── */
+  .panel-left {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* ── Drop Zone ── */
+  .drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 28px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(0, 212, 170, 0.04);
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0;
+    opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-icon { font-size: 28px; margin-bottom: 8px; }
+  .drop-label { font-size: 13px; color: var(--text-dim); }
+  .drop-label strong { color: var(--accent); }
+  .drop-ext { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+
+  /* ── File Info ── */
+  .file-info {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .file-info .fname { color: var(--accent); font-weight: 500; margin-bottom: 4px; word-break: break-all; }
+  .file-info .fmeta { color: var(--text-dim); }
+
+  /* ── Config Controls ── */
+  .control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+  .control-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    flex: 1;
+  }
+
+  .toggle {
+    width: 36px; height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    left: 2px; top: 2px;
+    width: 16px; height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: left 0.2s;
+  }
+  .toggle.on::after { left: 18px; }
+
+  input[type=range] {
+    width: 90px;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+  }
+  .range-val {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    width: 28px;
+    text-align: right;
+  }
+
+  select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  /* ── Block List ── */
+  .block-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .block-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .block-item:hover { background: var(--surface2); color: var(--text); }
+  .block-item.selected {
+    background: rgba(0,212,170,0.08);
+    border-color: rgba(0,212,170,0.3);
+    color: var(--accent);
+  }
+  .block-item .bi-check { color: var(--accent); font-size: 12px; }
+
+  /* ── Buttons ── */
+  .btn {
+    display: block; width: 100%;
+    padding: 10px;
+    border: none; border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0d0f14;
+  }
+  .btn-primary:hover { background: #00f0c3; }
+  .btn-primary:disabled { background: var(--border); color: var(--text-dim); cursor: not-allowed; }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    margin-top: 6px;
+  }
+  .btn-secondary:hover { border-color: var(--accent2); color: var(--accent2); }
+  .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Center: Preview ── */
+  .panel-center {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .preview-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .preview-toolbar .ptitle {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    flex: 1;
+  }
+  .zoom-btn {
+    width: 26px; height: 26px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.15s;
+  }
+  .zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .zoom-level {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 38px;
+    text-align: center;
+  }
+
+  .preview-area {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .preview-area.checkerboard {
+    background-image:
+      linear-gradient(45deg, #1a1d26 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1d26 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1d26 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1d26 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    background-color: #141720;
+  }
+  .preview-svg-wrap {
+    transform-origin: center center;
+    transition: transform 0.1s;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .preview-svg-wrap svg {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+  }
+  .preview-placeholder {
+    text-align: center;
+    color: var(--text-dim);
+  }
+  .preview-placeholder .ph-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+  .preview-placeholder p { font-size: 13px; }
+
+  /* ── Right Panel: Info / Audit ── */
+  .panel-right {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .audit-block {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .audit-block-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent2);
+    margin-bottom: 4px;
+  }
+  .audit-entity-row {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 1px 0;
+  }
+  .audit-entity-row span:last-child { color: var(--text); }
+
+  .layer-chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .layer-swatch {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .log-area {
+    flex: 1;
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    overflow-y: auto;
+    line-height: 1.7;
+  }
+  .log-line.info  { color: var(--text-dim); }
+  .log-line.ok    { color: var(--accent); }
+  .log-line.warn  { color: var(--warn); }
+  .log-line.error { color: #ff4444; }
+
+  /* ── Status Bar ── */
+  .statusbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 6px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .statusbar .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .dot.ready  { background: var(--accent); }
+  .dot.busy   { background: var(--accent2); animation: pulse 1s infinite; }
+  .dot.idle   { background: var(--border); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .sb-spacer { flex: 1; }
+
+  /* ── Scrollbar Styling ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">dxf<span>2</span>svg</div>
+  <div class="badge">v1.0</div>
+  <div class="spacer"></div>
+  <div class="cmd-hint">python -m dxf2svg convert drawing.dxf -o out.svg</div>
+</header>
+
+<main>
+  <!-- Left Panel -->
+  <div class="panel-left" id="panelLeft">
+
+    <div class="section">
+      <div class="section-title">Input File</div>
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".dxf,.DXF">
+        <div class="drop-icon">📐</div>
+        <div class="drop-label">Drop <strong>DXF</strong> file here</div>
+        <div class="drop-ext">or click to browse</div>
+      </div>
+      <div class="file-info" id="fileInfo" style="display:none; margin-top:10px;">
+        <div class="fname" id="fileName"></div>
+        <div class="fmeta" id="fileMeta"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Conversion Mode</div>
+      <select id="modeSelect" style="width:100%">
+        <option value="full">Full Drawing (Model Space)</option>
+        <option value="block">Single Block</option>
+        <option value="symbols">Symbol Library (all blocks)</option>
+      </select>
+      <div id="blockSelectWrap" style="display:none; margin-top:8px;">
+        <div class="section-title" style="margin-bottom:6px;">Select Block</div>
+        <div class="block-list" id="blockList"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Options</div>
+
+      <div class="control-row">
+        <label>Flip Y-axis (DXF → SVG)</label>
+        <div class="toggle on" id="toggleFlipY" onclick="toggleOpt('flipY',this)"></div>
+      </div>
+      <div class="control-row">
+        <label>Unfold all layers</label>
+        <div class="toggle on" id="toggleUnfold" onclick="toggleOpt('unfold',this)"></div>
+      </div>
+      <div class="control-row">
+        <label>Embed CSS classes</label>
+        <div class="toggle on" id="toggleCSS" onclick="toggleOpt('embedCSS',this)"></div>
+      </div>
+      <div class="control-row">
+        <label>Symbol mode output</label>
+        <div class="toggle" id="toggleSymbol" onclick="toggleOpt('symbolMode',this)"></div>
+      </div>
+      <div class="control-row">
+        <label>Stroke scale</label>
+        <input type="range" id="strokeScale" min="0.5" max="4" step="0.5" value="1"
+               oninput="document.getElementById('strokeVal').textContent=this.value+'×'">
+        <span class="range-val" id="strokeVal">1×</span>
+      </div>
+      <div class="control-row">
+        <label>Background</label>
+        <select id="bgSelect">
+          <option value="">Transparent</option>
+          <option value="#ffffff">White</option>
+          <option value="#0d0f14">Dark</option>
+          <option value="#f0f4f8">Light Grey</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <button class="btn btn-primary" id="convertBtn" disabled onclick="startConvert()">
+        Convert DXF → SVG
+      </button>
+      <button class="btn btn-secondary" id="downloadBtn" disabled onclick="downloadSVG()">
+        ↓ Download SVG
+      </button>
+      <button class="btn btn-secondary" id="copyBtn" disabled onclick="copySVG()">
+        ⎘ Copy SVG Code
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Center Preview -->
+  <div class="panel-center">
+    <div class="preview-toolbar">
+      <span class="ptitle" id="previewTitle">No file loaded</span>
+      <button class="zoom-btn" onclick="zoom(-0.2)">−</button>
+      <span class="zoom-level" id="zoomLabel">100%</span>
+      <button class="zoom-btn" onclick="zoom(0.2)">+</button>
+      <button class="zoom-btn" onclick="resetZoom()" title="Fit">⊡</button>
+      <button class="zoom-btn" id="bgToggleBtn" onclick="toggleBg()" title="Toggle background">◻</button>
+    </div>
+    <div class="preview-area checkerboard" id="previewArea">
+      <div class="preview-placeholder">
+        <div class="ph-icon">⬡</div>
+        <p>Load a DXF file and convert to preview</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel: Audit + Logs -->
+  <div class="panel-right">
+    <div class="section">
+      <div class="section-title">Block Audit</div>
+      <div id="auditContent" style="color:var(--text-dim); font-size:11px;">
+        Run conversion to see block tree
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Layers</div>
+      <div id="layerList" style="margin: -16px -16px 0;"></div>
+    </div>
+    <div class="section" style="flex:1; display:flex; flex-direction:column; overflow:hidden; border-bottom:none;">
+      <div class="section-title">Log</div>
+      <div class="log-area" id="logArea"></div>
+    </div>
+  </div>
+</main>
+
+<div class="statusbar">
+  <div class="dot idle" id="statusDot"></div>
+  <span id="statusText">Ready — load a DXF file</span>
+  <div class="sb-spacer"></div>
+  <span id="entityCount"></span>
+  <span id="svgSize"></span>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let state = {
+  file: null,
+  dxfText: null,
+  svgResult: null,
+  blocks: [],
+  selectedBlock: null,
+  zoomLevel: 1.0,
+  options: {
+    flipY: true, unfold: true, embedCSS: true,
+    symbolMode: false, strokeScale: 1.0, background: ''
+  }
+};
+
+// ── File Loading ──────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  if (!file.name.toLowerCase().endsWith('.dxf')) {
+    log('warn', `Expected .dxf file, got: ${file.name}`);
+    return;
+  }
+  state.file = file;
+  state.svgResult = null;
+
+  document.getElementById('fileInfo').style.display = 'block';
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileMeta').textContent = `${(file.size/1024).toFixed(1)} KB`;
+  document.getElementById('previewTitle').textContent = file.name;
+  document.getElementById('convertBtn').disabled = false;
+  document.getElementById('downloadBtn').disabled = true;
+  document.getElementById('copyBtn').disabled = true;
+
+  log('ok', `Loaded: ${file.name} (${(file.size/1024).toFixed(1)} KB)`);
+  setStatus('ready', 'File loaded — click Convert');
+
+  // Parse block list from DXF text for UI
+  const reader = new FileReader();
+  reader.onload = e => {
+    state.dxfText = e.target.result;
+    const blocks = parseDXFBlockNames(state.dxfText);
+    state.blocks = blocks;
+    renderBlockList(blocks);
+    log('info', `Found ${blocks.length} named blocks`);
+  };
+  reader.readAsText(file);
+}
+
+function parseDXFBlockNames(text) {
+  // Fast regex scan — actual extraction done by Python
+  const blocks = [];
+  const re = /^\s*2\r?\n\s*([^\r\n*][^\r\n]{0,100})\r?\n/gm;
+  const inBlocksSection = text.indexOf('BLOCKS') !== -1;
+  if (!inBlocksSection) return [];
+
+  // Extract block names from BLOCKS section
+  const blocksStart = text.indexOf('  0\nBLOCKS');
+  const blocksEnd   = text.indexOf('  0\nENTITIES');
+  const blocksText  = blocksStart !== -1 && blocksEnd !== -1
+    ? text.slice(blocksStart, blocksEnd)
+    : text;
+
+  let m;
+  const blockRe = /^\s*0\r?\n\s*BLOCK\r?\n(?:[\s\S]*?)^\s*2\r?\n\s*([^\r\n*][^\r\n]*)/gm;
+  while ((m = blockRe.exec(blocksText)) !== null) {
+    const name = m[1].trim();
+    if (name && !name.startsWith('*') && !blocks.includes(name)) {
+      blocks.push(name);
+    }
+  }
+  return blocks;
+}
+
+function renderBlockList(blocks) {
+  const list = document.getElementById('blockList');
+  list.innerHTML = '';
+  blocks.forEach(b => {
+    const item = document.createElement('div');
+    item.className = 'block-item' + (state.selectedBlock === b ? ' selected' : '');
+    item.textContent = b;
+    item.onclick = () => {
+      state.selectedBlock = b;
+      document.querySelectorAll('.block-item').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+    };
+    list.appendChild(item);
+  });
+}
+
+// ── Mode Select ───────────────────────────────────────────────────────────────
+document.getElementById('modeSelect').addEventListener('change', e => {
+  const show = e.target.value === 'block';
+  document.getElementById('blockSelectWrap').style.display = show ? 'block' : 'none';
+});
+
+// ── Options ───────────────────────────────────────────────────────────────────
+function toggleOpt(key, el) {
+  state.options[key] = !state.options[key];
+  el.classList.toggle('on', state.options[key]);
+}
+document.getElementById('strokeScale').oninput = function() {
+  state.options.strokeScale = parseFloat(this.value);
+};
+document.getElementById('bgSelect').onchange = function() {
+  state.options.background = this.value;
+};
+
+// ── Conversion (calls Python backend via fetch, or simulates) ─────────────────
+async function startConvert() {
+  if (!state.dxfText) return;
+  setStatus('busy', 'Converting…');
+  document.getElementById('convertBtn').disabled = true;
+  log('info', 'Starting conversion…');
+
+  try {
+    // Build form data to POST to local Flask server
+    const formData = new FormData();
+    formData.append('file', state.file);
+    formData.append('options', JSON.stringify({
+      mode: document.getElementById('modeSelect').value,
+      block: state.selectedBlock,
+      flipY: state.options.flipY,
+      unfold: state.options.unfold,
+      embedCSS: state.options.embedCSS,
+      symbolMode: state.options.symbolMode,
+      strokeScale: state.options.strokeScale,
+      background: state.options.background,
+    }));
+
+    const resp = await fetch('/api/convert', { method: 'POST', body: formData });
+    if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+    const data = await resp.json();
+
+    if (data.error) throw new Error(data.error);
+
+    state.svgResult = data.svg;
+    showPreview(data.svg);
+    renderAudit(data.audit);
+    renderLayers(data.layers);
+
+    const size = (new Blob([data.svg]).size / 1024).toFixed(1);
+    document.getElementById('entityCount').textContent = `${data.entity_count} entities`;
+    document.getElementById('svgSize').textContent = `${size} KB SVG`;
+
+    log('ok', `Conversion complete — ${data.entity_count} entities → ${size} KB`);
+    setStatus('ready', 'Conversion complete');
+    document.getElementById('downloadBtn').disabled = false;
+    document.getElementById('copyBtn').disabled = false;
+
+  } catch (err) {
+    log('error', err.message);
+    setStatus('idle', 'Conversion failed');
+
+    // Graceful fallback: show error in preview
+    showError(err.message);
+  }
+
+  document.getElementById('convertBtn').disabled = false;
+}
+
+function showPreview(svgStr) {
+  const area = document.getElementById('previewArea');
+  area.innerHTML = `<div class="preview-svg-wrap" id="svgWrap" style="transform:scale(${state.zoomLevel})">${svgStr}</div>`;
+}
+
+function showError(msg) {
+  document.getElementById('previewArea').innerHTML = `
+    <div style="text-align:center; color:var(--warn); font-family:var(--mono); font-size:12px; padding:24px; max-width:340px;">
+      <div style="font-size:28px; margin-bottom:12px;">⚠</div>
+      <div style="margin-bottom:8px; color:var(--text);">Conversion failed</div>
+      <div>${msg}</div>
+      <div style="margin-top:16px; font-size:10px; color:var(--text-dim);">
+        Make sure the Flask server is running:<br>
+        <code style="color:var(--accent)">python server.py</code>
+      </div>
+    </div>`;
+}
+
+function renderAudit(audit) {
+  if (!audit) return;
+  const el = document.getElementById('auditContent');
+  let html = '';
+  for (const [bname, counts] of Object.entries(audit.blocks || {})) {
+    html += `<div class="audit-block">
+      <div class="audit-block-name">${bname}</div>`;
+    for (const [etype, cnt] of Object.entries(counts)) {
+      html += `<div class="audit-entity-row"><span>${etype}</span><span>${cnt}</span></div>`;
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html || '<span style="font-size:11px; color:var(--text-dim)">No block data</span>';
+}
+
+function renderLayers(layers) {
+  if (!layers) return;
+  const el = document.getElementById('layerList');
+  let html = '';
+  for (const [name, info] of Object.entries(layers)) {
+    const color = info.rgb
+      ? `rgb(${info.rgb[0]},${info.rgb[1]},${info.rgb[2]})`
+      : '#888';
+    html += `<div class="layer-chip">
+      <div class="layer-swatch" style="background:${color}"></div>
+      <span style="color:var(--text)">${name}</span>
+      <span style="margin-left:auto; color:var(--text-dim)">${info.linetype}</span>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ── Zoom ──────────────────────────────────────────────────────────────────────
+function zoom(delta) {
+  state.zoomLevel = Math.max(0.1, Math.min(10, state.zoomLevel + delta));
+  const wrap = document.getElementById('svgWrap');
+  if (wrap) wrap.style.transform = `scale(${state.zoomLevel})`;
+  document.getElementById('zoomLabel').textContent = Math.round(state.zoomLevel * 100) + '%';
+}
+function resetZoom() {
+  state.zoomLevel = 1.0;
+  const wrap = document.getElementById('svgWrap');
+  if (wrap) wrap.style.transform = 'scale(1)';
+  document.getElementById('zoomLabel').textContent = '100%';
+}
+let showBg = true;
+function toggleBg() {
+  showBg = !showBg;
+  document.getElementById('previewArea').classList.toggle('checkerboard', showBg);
+}
+
+// ── Download / Copy ───────────────────────────────────────────────────────────
+function downloadSVG() {
+  if (!state.svgResult) return;
+  const blob = new Blob([state.svgResult], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (state.file?.name.replace(/\.dxf$/i, '') || 'output') + '.svg';
+  a.click();
+  log('ok', `Downloaded: ${a.download}`);
+}
+function copySVG() {
+  if (!state.svgResult) return;
+  navigator.clipboard.writeText(state.svgResult).then(() => {
+    log('ok', 'SVG code copied to clipboard');
+  });
+}
+
+// ── Log / Status ─────────────────────────────────────────────────────────────
+function log(level, msg) {
+  const area = document.getElementById('logArea');
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const div = document.createElement('div');
+  div.className = `log-line ${level}`;
+  div.textContent = `${ts}  ${msg}`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  dot.className = `dot ${state}`;
+  document.getElementById('statusText').textContent = msg;
+}
+</script>
+</body>
+</html>
