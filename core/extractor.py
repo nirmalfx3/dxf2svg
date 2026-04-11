@@ -310,25 +310,23 @@ class DXFExtractor:
         )
 
     def _handle_lwpolyline(self, e, m):
-        closed = bool(e.dxf.get("flags", 0) & 1)
-        try:
-            # flattening() expands bulge values into arc segments.
-            # Without this, arc segments between vertices are silently dropped
-            # and the curve renders as straight lines.
-            pts_raw = list(e.flattening(0.01))
-        except Exception:
-            pts_raw = list(e.get_points("xy"))
-        pts = [_transform_pt(m, p[0], p[1]) for p in pts_raw]
-        yield ExtPolyline(pts, closed, e.dxf.get("layer", "0"))
+        # virtual_entities() decomposes LWPOLYLINE into Line and Arc objects,
+        # correctly expanding bulge values into arc segments. Using get_points("xy")
+        # instead would silently discard all bulge data and render curves as straight lines.
+        for entity in e.virtual_entities():
+            t = entity.dxftype()
+            if t == "LINE":
+                yield from self._handle_line(entity, m)
+            elif t == "ARC":
+                yield from self._handle_arc(entity, m)
 
     def _handle_polyline(self, e, m):
-        closed = bool(e.dxf.get("flags", 0) & 1)
-        try:
-            pts_raw = list(e.flattening(0.01))
-        except Exception:
-            pts_raw = [vertex.dxf.location for vertex in e.vertices]
-        pts = [_transform_pt(m, p[0], p[1]) for p in pts_raw]
-        yield ExtPolyline(pts, closed, e.dxf.get("layer", "0"))
+        for entity in e.virtual_entities():
+            t = entity.dxftype()
+            if t == "LINE":
+                yield from self._handle_line(entity, m)
+            elif t == "ARC":
+                yield from self._handle_arc(entity, m)
 
     def _handle_spline(self, e, m):
         # flattening() evaluates the actual B-spline curve into dense segments.
