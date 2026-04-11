@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-11 · v1.0 — Production-ready utility
+> **Revision:** 2026-04-12 · v1.1 — Curve rendering fixes
 
 ---
 
@@ -73,9 +73,9 @@ GitHub: https://github.com/nirmalfx3/dxf2svg
 | `LINE` | `<line>` | Full transform chain applied |
 | `CIRCLE` | `<circle>` | Becomes `<ellipse>` when parent INSERT has non-uniform x/y scale |
 | `ARC` | `<path>` (A command) | Start/end angles rotated by accumulated parent transforms |
-| `LWPOLYLINE` | `<polyline>` / `<polygon>` | `<polygon>` when `closed=True` |
-| `POLYLINE` | `<polyline>` / `<polygon>` | Same closed-flag logic as LWPOLYLINE |
-| `SPLINE` | `<path>` (C command) | Approximated via Catmull-Rom → cubic bezier conversion |
+| `LWPOLYLINE` | `<line>` / `<path>` (A command) | Decomposed via `virtual_entities()` into Line and Arc segments — bulge values expanded to true arcs |
+| `POLYLINE` | `<line>` / `<path>` (A command) | Same decomposition as LWPOLYLINE via `virtual_entities()` |
+| `SPLINE` | `<path>` (L commands) | Evaluated by ezdxf `flattening(0.01)` into dense accurate segments; **not** Catmull-Rom |
 | `ELLIPSE` | `<ellipse>` | Rotation angle preserved via `transform="rotate(...)"` |
 | `TEXT` | `<text>` | Height scaled, rotation applied, Y-flip corrected per element |
 | `MTEXT` | `<text>` | Same as TEXT; rich formatting stripped |
@@ -102,8 +102,8 @@ All entities are normalized into these dataclasses before SVG rendering:
 | `ExtLine` | `x1, y1, x2, y2, layer` |
 | `ExtCircle` | `cx, cy, rx, ry, layer` |
 | `ExtArc` | `cx, cy, rx, ry, start_angle, end_angle, layer` |
-| `ExtPolyline` | `points: List[(x,y)], closed: bool, layer` |
-| `ExtSpline` | `points: List[(x,y)], closed: bool, layer` |
+| `ExtPolyline` | `points: List[(x,y)], closed: bool, layer` — emitted only for HATCH boundary paths; LWPOLYLINE/POLYLINE decompose to `ExtLine`/`ExtArc` |
+| `ExtSpline` | `points: List[(x,y)], closed: bool, layer` — dense evaluated points from `flattening()` |
 | `ExtEllipse` | `cx, cy, rx, ry, rotation, layer` |
 | `ExtText` | `x, y, text, height, rotation, layer` |
 | `ExtSolid` | `points: List[(x,y)], layer` |
@@ -555,7 +555,7 @@ results = conv.symbol_library(
 | 2D only | Z-coordinates are read but ignored. 3D geometry is projected flat. |
 | Complex linetypes | Dashed, dotted, and symbol linetypes are rendered as solid strokes. |
 | HATCH fill | Only the boundary polyline is extracted. Fill patterns are not rendered. |
-| SPLINE approximation | Degrees > 3 are approximated via Catmull-Rom → cubic bezier. High-curvature splines may deviate slightly. |
+| SPLINE accuracy | `flattening(0.01)` produces ≤ 0.01 DXF-unit deviation. Very high curvature splines may generate many segments. Falls back to control points if `flattening()` is unavailable. |
 | MTEXT rich formatting | Bold, italic, color overrides, and embedded fields in MTEXT are stripped to plain text. |
 | Attributed INSERTs | ATTRIB entities are extracted only when they behave like standard TEXT entities. |
 | Linked XREFs | External references (XREFs) are not resolved. |
@@ -587,6 +587,15 @@ results = conv.symbol_library(
 
 ### Install dependencies
 
+**Recommended — venv (avoids Windows site-packages path issues):**
+
+```bash
+cd G:/dxf2svg
+python -m venv .venv
+.venv\Scripts\pip install ezdxf flask
+```
+
+**Or system-wide:**
 ```bash
 pip install ezdxf flask
 ```
@@ -605,7 +614,11 @@ python -m dxf2svg symbols  drawing.dxf -o ./symbols/
 ### Web UI
 
 ```bash
-python G:/dxf2svg/server.py
+# Using venv
+G:/dxf2svg/.venv/Scripts/python.exe G:/dxf2svg/server.py
+
+# Or via serve.cmd (sets correct Python path automatically)
+G:/dxf2svg/serve.cmd
 # → http://localhost:5000
 ```
 
