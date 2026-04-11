@@ -235,7 +235,11 @@ class SVGBuilder:
     def _svg_spline(self, e: ExtSpline) -> ET.Element:
         if len(e.points) < 2:
             return None
-        d = self._spline_to_path(e.points, e.closed)
+        # Points come from ezdxf flattening() — already dense and accurate.
+        # Render as a polyline path; no further curve fitting needed.
+        d = "M " + " L ".join(f"{x:.4f},{y:.4f}" for x, y in e.points)
+        if e.closed:
+            d += " Z"
         el = ET.Element("path")
         el.set("d", d)
         self._apply_attrs(el, e.layer)

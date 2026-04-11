@@ -323,11 +323,16 @@ class DXFExtractor:
         yield ExtPolyline(pts, closed, e.dxf.get("layer", "0"))
 
     def _handle_spline(self, e, m):
-        # Use fit points if available, else control points
+        # flattening() evaluates the actual B-spline curve into dense segments.
+        # Using raw control/fit points instead would give wrong shapes because
+        # B-spline control points are NOT on the curve.
         try:
-            pts_raw = list(e.fit_points) if e.fit_points else list(e.control_points)
+            pts_raw = list(e.flattening(0.01))  # max 0.01-unit deviation
         except Exception:
-            pts_raw = list(e.control_points)
+            try:
+                pts_raw = list(e.fit_points) if e.fit_points else list(e.control_points)
+            except Exception:
+                pts_raw = list(e.control_points)
         pts = [_transform_pt(m, p[0], p[1]) for p in pts_raw]
         closed = bool(e.dxf.get("flags", 0) & 1)
         yield ExtSpline(pts, closed, e.dxf.get("layer", "0"))
