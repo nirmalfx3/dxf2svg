@@ -310,16 +310,24 @@ class DXFExtractor:
         )
 
     def _handle_lwpolyline(self, e, m):
-        pts = [_transform_pt(m, p[0], p[1]) for p in e.get_points("xy")]
         closed = bool(e.dxf.get("flags", 0) & 1)
+        try:
+            # flattening() expands bulge values into arc segments.
+            # Without this, arc segments between vertices are silently dropped
+            # and the curve renders as straight lines.
+            pts_raw = list(e.flattening(0.01))
+        except Exception:
+            pts_raw = list(e.get_points("xy"))
+        pts = [_transform_pt(m, p[0], p[1]) for p in pts_raw]
         yield ExtPolyline(pts, closed, e.dxf.get("layer", "0"))
 
     def _handle_polyline(self, e, m):
-        pts = []
-        for vertex in e.vertices:
-            p = vertex.dxf.location
-            pts.append(_transform_pt(m, p.x, p.y))
         closed = bool(e.dxf.get("flags", 0) & 1)
+        try:
+            pts_raw = list(e.flattening(0.01))
+        except Exception:
+            pts_raw = [vertex.dxf.location for vertex in e.vertices]
+        pts = [_transform_pt(m, p[0], p[1]) for p in pts_raw]
         yield ExtPolyline(pts, closed, e.dxf.get("layer", "0"))
 
     def _handle_spline(self, e, m):
