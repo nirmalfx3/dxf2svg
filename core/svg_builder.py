@@ -33,9 +33,10 @@ ACI_COLORS = {
     253: "#999999", 254: "#BBBBBB", 255: "#DDDDDD",
 }
 
-DEFAULT_STROKE = "#1a1a2e"
-DEFAULT_LW_PX  = 1.0
-PADDING_FACTOR = 0.05   # 5% padding around bounding box
+DEFAULT_STROKE      = "#1a1a2e"
+DEFAULT_LW_PX       = 1.0
+PADDING_FACTOR      = 0.05    # 5% padding around bounding box
+DEFAULT_OUTPUT_SIZE = 800.0   # px — used when no target_width/height is set
 
 
 @dataclass
@@ -87,9 +88,25 @@ class SVGBuilder:
         vw = w + 2 * pad_x
         vh = h + 2 * pad_y
 
-        # Resolve target size
-        out_w = self.cfg.target_width  or vw
-        out_h = self.cfg.target_height or vh
+        # Resolve target size — normalize to screen pixels when not specified.
+        # DXF units (mm, inches, unitless) must not be used directly as pixel
+        # dimensions, or the SVG renders as sub-pixel and is invisible.
+        if self.cfg.target_width and self.cfg.target_height:
+            out_w, out_h = self.cfg.target_width, self.cfg.target_height
+        elif self.cfg.target_width:
+            out_w = self.cfg.target_width
+            out_h = (vh / vw * out_w) if vw > 0 else out_w
+        elif self.cfg.target_height:
+            out_h = self.cfg.target_height
+            out_w = (vw / vh * out_h) if vh > 0 else out_h
+        else:
+            # Default: normalize longest edge to DEFAULT_OUTPUT_SIZE px
+            if vw >= vh:
+                out_w = DEFAULT_OUTPUT_SIZE
+                out_h = (vh / vw * DEFAULT_OUTPUT_SIZE) if vw > 0 else DEFAULT_OUTPUT_SIZE
+            else:
+                out_h = DEFAULT_OUTPUT_SIZE
+                out_w = (vw / vh * DEFAULT_OUTPUT_SIZE) if vh > 0 else DEFAULT_OUTPUT_SIZE
 
         # Root element
         svg = ET.Element("svg")

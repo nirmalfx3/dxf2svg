@@ -133,8 +133,8 @@ def list_blocks():
 
 
 if __name__ == "__main__":
-    print("\n  DXF → SVG Converter")
-    print("  ─────────────────────")
+    print("\n  DXF -> SVG Converter")
+    print("  ---------------------")
     print("  Open:  http://localhost:5000")
     print("  Stop:  Ctrl+C\n")
     app.run(debug=True, port=5000)
