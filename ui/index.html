@@ -518,6 +518,25 @@
     text-align: center;
   }
 
+  /* ── Color inputs in props bar ── */
+  .ep-color {
+    width: 28px; height: 22px;
+    border: 1px solid var(--border); border-radius: 3px;
+    cursor: pointer; padding: 1px; background: var(--surface2);
+    flex-shrink: 0;
+  }
+
+  /* ── Block breadcrumb ── */
+  .block-breadcrumb {
+    display: none; align-items: center; gap: 6px;
+    padding: 4px 14px;
+    background: rgba(77,124,255,0.07);
+    border-bottom: 1px solid rgba(77,124,255,0.2);
+    font-family: var(--mono); font-size: 10px; color: var(--accent2);
+    flex-shrink: 0;
+  }
+  .block-breadcrumb.visible { display: flex; }
+
   /* ── SVG edit mode cursor overrides ── */
   .svg-tool-select svg { cursor: default !important; }
   .svg-tool-select svg *:not(#_sel_overlay) { cursor: pointer !important; }
@@ -659,6 +678,19 @@
       <button class="tool-btn" id="redoBtn" title="Redo  [Ctrl+Y]" onclick="redo()" disabled>↪</button>
       <div class="tsep"></div>
       <button class="tool-btn wide" title="Export edited SVG" onclick="exportEdited()" style="color:var(--accent)">↓ SVG</button>
+      <div class="tsep"></div>
+      <span class="tlabel">Xform</span>
+      <button class="tool-btn" id="toolRotate" onclick="setTool('rotate')" title="Rotate [drag or R key]">↻</button>
+      <button class="tool-btn" onclick="flipSelected('h')" title="Flip Horizontal">↔</button>
+      <button class="tool-btn" onclick="flipSelected('v')" title="Flip Vertical">↕</button>
+      <button class="tool-btn" onclick="duplicateSelected()" title="Duplicate [Ctrl+D]">⧉</button>
+    </div>
+
+    <!-- Block breadcrumb (shown when drilled into a <g> block) -->
+    <div class="block-breadcrumb" id="blockBreadcrumb">
+      <span style="color:var(--text-dim)">Editing:</span>
+      <span id="breadcrumbPath"></span>
+      <button class="ep-btn" onclick="exitBlock()" style="margin-left:auto">↑ Exit Block</button>
     </div>
 
     <div class="preview-area checkerboard" id="previewArea">
@@ -679,6 +711,14 @@
       <input class="ep-custom" type="number" id="scaleCustom" value="1.5" min="0.1" max="20" step="0.1">
       <button class="ep-btn" onclick="scaleSelected(parseFloat(document.getElementById('scaleCustom').value)||1)">Apply</button>
       <button class="ep-btn danger" onclick="deleteSelected()">Delete</button>
+      <div class="tsep" style="height:14px;margin:0 4px"></div>
+      <span class="ep-label">Stroke:</span>
+      <input type="color" id="epStrokeColor" class="ep-color" value="#00d4aa">
+      <input type="number" id="epStrokeWidth" class="ep-custom" min="0.1" max="100" step="0.5" value="1" style="width:48px">
+      <span class="ep-label">Fill:</span>
+      <input type="color" id="epFillColor" class="ep-color" value="#000000">
+      <button class="ep-btn" id="epFillNone" onclick="setFillNone()">None</button>
+      <button class="ep-btn" onclick="applyAppearance()">Apply</button>
     </div>
   </div>
 
@@ -1032,6 +1072,14 @@ const editSt = {
   dragEl: null,
   dragStart: null,
   dragInitTransform: '',
+  // rotate
+  rotateActive: false,
+  rotateOrigin: null,
+  rotateStartAngle: 0,
+  rotateBaseTransform: '',
+  // block drilling
+  blockContext: null,
+  blockPath: [],
 };
 
 function getSVG() {
@@ -1080,7 +1128,7 @@ function setTool(t) {
   editSt.tool = t;
   clearSelection();
   // Update button active state
-  ['Select','Move','Line','Circle','Rect','Text'].forEach(name => {
+  ['Select','Move','Line','Circle','Rect','Text','Rotate'].forEach(name => {
     const b = document.getElementById('tool' + name);
     if (b) b.classList.toggle('active', name.toLowerCase() === t);
   });
@@ -1134,6 +1182,8 @@ function resolveTarget(target, svg) {
   if (el.tagName === 'tspan') el = el.parentElement;
   // Don't select <defs>, <style>, <title>
   if (['defs','style','title'].includes(el.tagName)) return null;
+  // When drilled into a block context, only accept descendants of it
+  if (editSt.blockContext && !editSt.blockContext.contains(el)) return null;
   return el;
 }
 
@@ -1200,6 +1250,17 @@ function updatePropsPanel() {
     info = `${el.childElementCount} children`;
   }
   document.getElementById('epInfo').textContent = info;
+
+  // Populate appearance pickers from element's current attributes
+  const stroke = el.getAttribute('stroke') || '';
+  const sw     = el.getAttribute('stroke-width') || '';
+  const fill   = el.getAttribute('fill') || '';
+  const scEl = document.getElementById('epStrokeColor');
+  const swEl = document.getElementById('epStrokeWidth');
+  const fcEl = document.getElementById('epFillColor');
+  if (scEl && stroke && stroke !== 'none') { try { scEl.value = stroke; } catch(_) {} }
+  if (swEl && sw) swEl.value = parseFloat(sw) || 1;
+  if (fcEl && fill && fill !== 'none') { try { fcEl.value = fill; } catch(_) {} }
 }
 
 // ── Scale ─────────────────────────────────────────────────────────────────────
@@ -1218,6 +1279,105 @@ function scaleSelected(factor) {
     `${existing} translate(${cx},${cy}) scale(${factor}) translate(${-cx},${-cy})`);
   updateSelectionOverlay();
   log('ok', `Scaled ${el.tagName} \xd7${factor}`);
+}
+
+// ── Flip ──────────────────────────────────────────────────────────────────────
+
+function flipSelected(axis) {
+  const el = editSt.selected;
+  if (!el || el.id === '_sel_overlay') { log('warn', 'No element selected'); return; }
+  saveUndo();
+  let bb;
+  try { bb = el.getBBox(); } catch(_) { return; }
+  const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+  const sx = axis === 'h' ? -1 : 1, sy = axis === 'v' ? -1 : 1;
+  const cur = el.getAttribute('transform') || '';
+  el.setAttribute('transform',
+    `${cur} translate(${cx},${cy}) scale(${sx},${sy}) translate(${-cx},${-cy})`);
+  updateSelectionOverlay();
+  log('ok', `Flipped ${axis.toUpperCase()} <${el.tagName}>`);
+}
+
+// ── Duplicate ─────────────────────────────────────────────────────────────────
+
+function duplicateSelected() {
+  const el = editSt.selected;
+  if (!el || el.id === '_sel_overlay') { log('warn', 'No element selected'); return; }
+  saveUndo();
+  const svg = getSVG();
+  const vb = svg.viewBox.baseVal;
+  const offset = Math.min(vb.width, vb.height) * 0.03;
+  const clone = el.cloneNode(true);
+  clone.removeAttribute('data-new');
+  const cur = clone.getAttribute('transform') || '';
+  clone.setAttribute('transform', `${cur} translate(${offset},${offset})`);
+  el.parentNode.insertBefore(clone, el.nextSibling);
+  selectElement(clone);
+  log('ok', `Duplicated <${el.tagName}>`);
+}
+
+// ── Appearance ────────────────────────────────────────────────────────────────
+
+function applyAppearance() {
+  const el = editSt.selected;
+  if (!el || el.id === '_sel_overlay') { log('warn', 'No element selected'); return; }
+  saveUndo();
+  const stroke = document.getElementById('epStrokeColor').value;
+  const width  = document.getElementById('epStrokeWidth').value;
+  const fill   = document.getElementById('epFillColor').value;
+  el.setAttribute('stroke', stroke);
+  el.setAttribute('stroke-width', parseFloat(width) || 1);
+  el.setAttribute('fill', fill);
+  updateSelectionOverlay();
+  log('ok', `Applied appearance to <${el.tagName}>`);
+}
+
+function setFillNone() {
+  const el = editSt.selected;
+  if (!el || el.id === '_sel_overlay') return;
+  saveUndo();
+  el.setAttribute('fill', 'none');
+  log('ok', `Set fill=none on <${el.tagName}>`);
+}
+
+// ── Block Drilling ────────────────────────────────────────────────────────────
+
+function svgDblClick(e) {
+  if (!editSt.active) return;
+  const svg = getSVG();
+  const el = resolveTarget(e.target, svg);
+  if (el && (el.tagName === 'g' || el.tagName === 'G')) {
+    enterBlock(el);
+  }
+}
+
+function enterBlock(g) {
+  clearSelection();
+  editSt.blockContext = g;
+  const label = g.getAttribute('id') || g.getAttribute('data-block') || '<g>';
+  editSt.blockPath.push({ el: g, label });
+  g.style.outline = '1px solid rgba(77,124,255,0.4)';
+  document.getElementById('blockBreadcrumb').classList.add('visible');
+  document.getElementById('breadcrumbPath').textContent =
+    editSt.blockPath.map(b => b.label).join(' › ');
+  log('info', `Entered block: ${label}`);
+}
+
+function exitBlock() {
+  if (!editSt.blockPath.length) return;
+  clearSelection();
+  editSt.blockPath[editSt.blockPath.length - 1].el.style.outline = '';
+  editSt.blockPath.pop();
+  editSt.blockContext = editSt.blockPath.length
+    ? editSt.blockPath[editSt.blockPath.length - 1].el
+    : null;
+  if (!editSt.blockPath.length) {
+    document.getElementById('blockBreadcrumb').classList.remove('visible');
+  } else {
+    document.getElementById('breadcrumbPath').textContent =
+      editSt.blockPath.map(b => b.label).join(' › ');
+  }
+  log('info', 'Exited block context');
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────────
@@ -1250,6 +1410,7 @@ function attachSVGListeners(svg) {
   svg.addEventListener('mousedown', svgMouseDown);
   svg.addEventListener('mousemove', svgMouseMove);
   svg.addEventListener('mouseup',   svgMouseUp);
+  svg.addEventListener('dblclick', svgDblClick);
   document.addEventListener('keydown', editKeyDown);
 }
 
@@ -1259,7 +1420,13 @@ function editKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
   if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
-  if (e.key === 'Escape') clearSelection();
+  if (e.ctrlKey && e.key === 'd') { e.preventDefault(); duplicateSelected(); }
+  if (e.key === 'Escape') { if (editSt.blockPath.length) exitBlock(); else clearSelection(); }
+  if (!e.ctrlKey && !e.altKey) {
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setTool(editSt.tool === 'rotate' ? 'select' : 'rotate'); }
+    if (e.key === 'h' || e.key === 'H') { e.preventDefault(); flipSelected('h'); }
+    if (e.key === 'v' || e.key === 'V') { e.preventDefault(); flipSelected('v'); }
+  }
 }
 
 function svgMouseDown(e) {
@@ -1288,6 +1455,22 @@ function svgMouseDown(e) {
     return;
   }
 
+  if (editSt.tool === 'rotate') {
+    const target = resolveTarget(e.target, svg);
+    if (target) {
+      selectElement(target);
+      let bb;
+      try { bb = target.getBBox(); } catch(_) { return; }
+      editSt.rotateOrigin = { cx: bb.x + bb.width / 2, cy: bb.y + bb.height / 2 };
+      editSt.rotateStartAngle = Math.atan2(pt.y - editSt.rotateOrigin.cy, pt.x - editSt.rotateOrigin.cx);
+      editSt.rotateBaseTransform = target.getAttribute('transform') || '';
+      editSt.rotateActive = true;
+      saveUndo();
+      e.preventDefault();
+    }
+    return;
+  }
+
   if (editSt.tool === 'text') {
     placeText(pt, svg);
     return;
@@ -1307,6 +1490,16 @@ function svgMouseMove(e) {
   if (!svg) return;
   const pt = screenToSVG(svg, e.clientX, e.clientY);
 
+  if (editSt.rotateActive && editSt.selected && editSt.rotateOrigin) {
+    const angle = Math.atan2(pt.y - editSt.rotateOrigin.cy, pt.x - editSt.rotateOrigin.cx);
+    const delta = (angle - editSt.rotateStartAngle) * 180 / Math.PI;
+    const { cx, cy } = editSt.rotateOrigin;
+    editSt.selected.setAttribute('transform',
+      `${editSt.rotateBaseTransform} rotate(${delta.toFixed(2)},${cx.toFixed(3)},${cy.toFixed(3)})`);
+    updateSelectionOverlay();
+    return;
+  }
+
   if (editSt.dragActive && editSt.dragEl) {
     const dx = pt.x - editSt.dragStart.x;
     const dy = pt.y - editSt.dragStart.y;
@@ -1324,6 +1517,13 @@ function svgMouseMove(e) {
 function svgMouseUp(e) {
   if (!editSt.active) return;
   const svg = getSVG();
+
+  if (editSt.rotateActive) {
+    editSt.rotateActive = false;
+    editSt.rotateOrigin = null;
+    log('ok', `Rotated <${editSt.selected?.tagName || 'element'}>`);
+    return;
+  }
 
   if (editSt.dragActive) {
     editSt.dragActive = false;
