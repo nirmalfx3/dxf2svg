@@ -4,6 +4,24 @@
 
 ---
 
+## Suite Wiki
+
+dxf2svg is part of the **Solar PV Software Suite**. A central knowledge base lives at:
+
+**`G:\suite-wiki\`** — read `index.md` first to navigate.
+
+The wiki holds cross-project context: how ELiGen uses dxf2svg, the full integration topology, shared conventions, and patterns for extending the suite.
+
+| Situation | Page to read |
+|-----------|-------------|
+| How ELiGen uses dxf2svg | `suite/integration-topology.md` |
+| How dxf2svg fits into the suite | `projects/dxf2svg.md` |
+| Adding a new tool or interface | `patterns/new-suite-tool.md` |
+
+When dxf2svg changes its Python API or supported entities, update `projects/dxf2svg.md` in place.
+
+---
+
 ## What It Does
 
 Converts AutoCAD DXF files to clean, normalized SVG output. Handles nested block hierarchies, full matrix transform chains, and 10+ DXF entity types. Three interfaces: CLI, Flask web UI, and Python API.
