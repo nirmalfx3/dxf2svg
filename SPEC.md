@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-12 · v1.1 — Curve rendering fixes
+> **Revision:** 2026-04-12 · v1.2 — Edit mode: rotate, flip, duplicate, appearance, block drilling
 
 ---
 
@@ -496,14 +496,45 @@ Returns the list of named blocks without converting.
 - Fit-to-window button
 - Checkerboard background toggle
 - **EDIT mode** (toggle via EDIT button):
-  - Select tool (↖): click any SVG element to select it
-  - Move tool (⤢): drag selected element to reposition
-  - Draw tools: Line (╱), Circle (○), Rectangle (□)
-  - Text tools: Add text (T+, click to place), Remove all text (T×)
-  - Delete selected element (✕) or `Delete` key
-  - Undo (↩) / Redo (↪) — `Ctrl+Z` / `Ctrl+Y`
-  - Properties bar (when element selected): tag info + scale buttons (½× ¾× 1.5× 2× custom)
-  - Export edited SVG (↓ SVG) — opens native Save As dialog
+
+  *Selection & movement*
+  - Select tool (↖): click any SVG element to select it; dashed overlay shows bounds
+  - Move tool (⤢): click then drag selected element to reposition
+
+  *Draw tools*
+  - Line (╱): drag to draw a line segment
+  - Circle (○): drag from center to set radius
+  - Rectangle (□): drag corner-to-corner
+  - Text (T+): click in canvas to place text (prompted); `T×` strips all `<text>` elements
+
+  *Transform tools (Xform group)*
+  - Rotate (↻): drag element to rotate around its bounding box center; key `R` toggles the tool
+  - Flip H (↔): mirror element horizontally around center; key `H`
+  - Flip V (↕): mirror element vertically around center; key `V`
+  - Duplicate (⧉): clone element with small diagonal offset, auto-selects the clone; `Ctrl+D`
+
+  *Appearance controls* (props bar, shown when element selected)
+  - Stroke color picker — pre-populated from element's current `stroke` attribute
+  - Stroke width input — pre-populated from element's current `stroke-width`
+  - Fill color picker — pre-populated from element's current `fill` attribute
+  - "None" — sets `fill="none"`; "Apply" — writes all three to the element
+
+  *In-place block drilling*
+  - Double-click any `<g>` group to enter its context; blue outline marks the active group
+  - Breadcrumb bar appears showing the nesting path (e.g. `root › PANEL › CB`)
+  - All selection/editing is scoped to children of the active group only
+  - "↑ Exit Block" button or `Escape` to pop one level; nested drilling is fully supported
+
+  *Undo/Delete*
+  - Delete (✕), `Delete` or `Backspace` key
+  - Undo (↩) `Ctrl+Z`, Redo (↪) `Ctrl+Y` — 60-step stack; all operations are undoable
+
+  *Properties bar*
+  - Element tag and info (radius, length, text preview, child count)
+  - Scale: ½× ¾× 1.5× 2× + custom numeric; Appearance controls (above); Delete
+
+  *Export*
+  - Export edited SVG (↓ SVG) — strips selection overlay, opens native OS Save As dialog
 
 **Right panel — Diagnostics**
 - Block audit tree: entity counts per block after conversion
