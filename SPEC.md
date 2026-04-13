@@ -6,18 +6,22 @@
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
-2. [Supported DXF Entities](#2-supported-dxf-entities)
-3. [BuildConfig — Conversion Options](#3-buildconfig--conversion-options)
-4. [Architecture — Data Flow](#4-architecture--data-flow)
-5. [Python API Reference](#5-python-api-reference)
-6. [CLI Reference](#6-cli-reference)
-7. [Web API Reference](#7-web-api-reference)
-8. [Web UI](#8-web-ui)
-9. [Integration with ELiGen](#9-integration-with-eligen)
-10. [Known Limitations](#10-known-limitations)
-11. [Key Conventions](#11-key-conventions)
-12. [Running dxf2svg](#12-running-dxf2svg)
+| § | Title | Lines |
+|---|-------|-------|
+| 1 | [Overview](#1-overview) | 24 – 66 |
+| 2 | [Supported DXF Entities](#2-supported-dxf-entities) | 67 – 113 |
+| 3 | [BuildConfig — Conversion Options](#3-buildconfig--conversion-options) | 114 – 153 |
+| 4 | [Architecture — Data Flow](#4-architecture--data-flow) | 154 – 218 |
+| 5 | [Python API Reference](#5-python-api-reference) | 219 – 343 |
+| 6 | [CLI Reference](#6-cli-reference) | 344 – 412 |
+| 7 | [Web API Reference](#7-web-api-reference) | 413 – 479 |
+| 8 | [Web UI](#8-web-ui) | 480 – 549 |
+| 9 | [Integration with ELiGen](#9-integration-with-eligen) | 550 – 581 |
+| 10 | [Known Limitations](#10-known-limitations) | 582 – 596 |
+| 11 | [Key Conventions](#11-key-conventions) | 597 – 616 |
+| 12 | [Running dxf2svg](#12-running-dxf2svg) | 617 – end |
+
+> `Read SPEC.md limit=20` for this index · `Read SPEC.md offset=<start> limit=<count>` for any section
 
 ---
 

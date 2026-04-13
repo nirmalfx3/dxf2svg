@@ -63,16 +63,22 @@ class SVGBuilder:
         self.layers = layers
         self.cfg = config or BuildConfig()
         self._entities = []
+        self._used_layers: set = set()
+        self._layer_attr_cache: Dict[str, Dict[str, str]] = {}
 
     def add_entities(self, entity_iter):
         """Consume extractor output."""
         self._entities = list(entity_iter)
 
+    @property
+    def entity_count(self) -> int:
+        return len(self._entities)
+
     def build(self) -> str:
         if not self._entities:
             return self._empty_svg()
 
-        bbox = self._compute_bbox()
+        bbox = self._pre_scan()
         if bbox is None:
             return self._empty_svg()
 
@@ -192,7 +198,8 @@ class SVGBuilder:
         }
 
     def _apply_attrs(self, elem: ET.Element, layer: str):
-        for k, v in self._layer_attrs(layer).items():
+        attrs = self._layer_attr_cache.get(layer) or self._layer_attrs(layer)
+        for k, v in attrs.items():
             elem.set(k, v)
 
     def _svg_line(self, e: ExtLine) -> ET.Element:
@@ -265,7 +272,7 @@ class SVGBuilder:
             cur = el.get("transform", "")
             flip = f"scale(1,-1) translate(0,{-2*e.y:.4f})"
             el.set("transform", f"{cur} {flip}".strip())
-        attrs = self._layer_attrs(e.layer)
+        attrs = self._layer_attr_cache.get(e.layer) or self._layer_attrs(e.layer)
         el.set("class", attrs["class"])
         el.set("fill", attrs["stroke"])
         el.set("stroke", "none")
@@ -276,7 +283,7 @@ class SVGBuilder:
         pts = " ".join(f"{x:.4f},{y:.4f}" for x, y in e.points)
         el = ET.Element("polygon")
         el.set("points", pts)
-        attrs = self._layer_attrs(e.layer)
+        attrs = self._layer_attr_cache.get(e.layer) or self._layer_attrs(e.layer)
         el.set("class", attrs["class"])
         el.set("fill", attrs["stroke"])
         el.set("stroke", attrs["stroke"])
@@ -346,33 +353,62 @@ class SVGBuilder:
             d += " Z"
         return d
 
-    # ── bounding box ─────────────────────────────────────────────────────────
+    # ── pre-scan: bbox + used layers + attr cache (single pass) ─────────────
 
-    def _compute_bbox(self):
-        xs, ys = [], []
+    def _pre_scan(self):
+        """
+        Single pass over entities that computes:
+          1. Bounding box (min/max x,y) — incremental, no coordinate lists
+          2. Used layer names set
+          3. Layer attribute cache (dict per layer, pre-computed once)
+
+        Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
+        """
+        min_x = min_y = float("inf")
+        max_x = max_y = float("-inf")
+        used: set = set()
 
         for e in self._entities:
+            if hasattr(e, "layer"):
+                used.add(e.layer)
             t = type(e).__name__
             try:
                 if t == "ExtLine":
-                    xs += [e.x1, e.x2]; ys += [e.y1, e.y2]
-                elif t in ("ExtCircle", "ExtEllipse"):
-                    xs += [e.cx - e.rx, e.cx + e.rx]
-                    ys += [e.cy - e.ry, e.cy + e.ry]
-                elif t == "ExtArc":
-                    xs += [e.cx - e.rx, e.cx + e.rx]
-                    ys += [e.cy - e.ry, e.cy + e.ry]
+                    if e.x1 < min_x: min_x = e.x1
+                    if e.x2 < min_x: min_x = e.x2
+                    if e.x1 > max_x: max_x = e.x1
+                    if e.x2 > max_x: max_x = e.x2
+                    if e.y1 < min_y: min_y = e.y1
+                    if e.y2 < min_y: min_y = e.y2
+                    if e.y1 > max_y: max_y = e.y1
+                    if e.y2 > max_y: max_y = e.y2
+                elif t in ("ExtCircle", "ExtEllipse", "ExtArc"):
+                    lx = e.cx - e.rx; rx = e.cx + e.rx
+                    ly = e.cy - e.ry; ry = e.cy + e.ry
+                    if lx < min_x: min_x = lx
+                    if rx > max_x: max_x = rx
+                    if ly < min_y: min_y = ly
+                    if ry > max_y: max_y = ry
                 elif t in ("ExtPolyline", "ExtSpline", "ExtSolid"):
-                    pts = e.points
-                    xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
+                    for px, py in e.points:
+                        if px < min_x: min_x = px
+                        if px > max_x: max_x = px
+                        if py < min_y: min_y = py
+                        if py > max_y: max_y = py
                 elif t == "ExtText":
-                    xs.append(e.x); ys.append(e.y)
+                    if e.x < min_x: min_x = e.x
+                    if e.x > max_x: max_x = e.x
+                    if e.y < min_y: min_y = e.y
+                    if e.y > max_y: max_y = e.y
             except Exception:
                 pass
 
-        if not xs:
+        self._used_layers = used
+        self._layer_attr_cache = {name: self._layer_attrs(name) for name in used}
+
+        if min_x == float("inf"):
             return None
-        return min(xs), min(ys), max(xs), max(ys)
+        return min_x, min_y, max_x, max_y
 
     # ── CSS generation ───────────────────────────────────────────────────────
 
@@ -381,8 +417,7 @@ class SVGBuilder:
             "svg { font-family: monospace; }",
             "line, polyline, polygon, path, circle, ellipse { vector-effect: non-scaling-stroke; }",
         ]
-        used_layers = {e.layer for e in self._entities if hasattr(e, "layer")}
-        for name in sorted(used_layers):
+        for name in sorted(self._used_layers):
             info = self.layers.get(name)
             cls = f"layer-{name.replace(' ', '_').replace('/', '_')}"
             stroke = DEFAULT_STROKE

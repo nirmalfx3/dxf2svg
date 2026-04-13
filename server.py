@@ -78,11 +78,7 @@ def convert():
             else:
                 return jsonify({"error": f"Unknown mode: {mode}"}), 400
 
-            # Count entities (rough count from SVG tags)
-            entity_count = svg_str.count("<line") + svg_str.count("<circle") + \
-                           svg_str.count("<path") + svg_str.count("<polyline") + \
-                           svg_str.count("<polygon") + svg_str.count("<ellipse") + \
-                           svg_str.count("<text")
+            entity_count = conv.last_entity_count
 
             # Serialize audit and layer info
             audit_json = json.loads(conv.audit())

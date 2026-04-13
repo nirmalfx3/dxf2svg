@@ -43,6 +43,7 @@ class DXFConverter:
         )
         self.dxf_path = dxf_path
         self.extractor = DXFExtractor(dxf_path, unfold_all_layers=unfold_all_layers)
+        self.last_entity_count: int = 0
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ class DXFConverter:
         builder = SVGBuilder(self.extractor.layers, cfg)
         builder.add_entities(entities)
         svg_str = builder.build()
+        self.last_entity_count = builder.entity_count
 
         _write(output_path, svg_str)
         logger.info(f"Saved: {output_path}")
@@ -86,6 +88,7 @@ class DXFConverter:
         builder = SVGBuilder(self.extractor.layers, cfg)
         builder.add_entities(entities)
         svg_str = builder.build()
+        self.last_entity_count = builder.entity_count
 
         _write(output_path, svg_str)
         logger.info(f"Saved: {output_path}")
