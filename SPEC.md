@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-12 · v1.2 — Edit mode: rotate, flip, duplicate, appearance, block drilling
+> **Revision:** 2026-04-14 · v1.2 — Edit mode: rotate, flip, duplicate, appearance, block drilling
 
 ---
 
@@ -146,10 +146,13 @@ cfg = BuildConfig(
 | `symbol_mode` | `bool` | `False` | Wrap geometry in `<symbol id="...">` instead of root `<svg>`. Used by `symbol_library()`. |
 | `symbol_id` | `str` | `"symbol"` | XML `id` for the `<symbol>` element. Used when `symbol_mode=True`. |
 | `font_family` | `str` | `"monospace"` | CSS `font-family` for `<text>` elements. |
+| `preserve_size` | `bool` | `False` | Use raw DXF coordinate extent as px dimensions (1 DXF unit = 1 px). Overrides default 800px normalization; ignored when `target_width`/`target_height` are set. |
 
 ### Output Size Normalization
 
-When neither `target_width` nor `target_height` is set, the SVG is normalized so the longest edge = **800 px**, preserving aspect ratio. This is critical because DXF coordinates are in physical units (mm, inches, or unitless) — without normalization the SVG renders as sub-pixel and is invisible in the browser.
+When neither `target_width`/`target_height` nor `preserve_size` is set, the SVG is normalized so the longest edge = **800 px**, preserving aspect ratio. This is critical because DXF coordinates are in physical units (mm, inches, or unitless) — without normalization the SVG renders as sub-pixel and is invisible in the browser.
+
+Set `preserve_size=True` to use raw DXF coordinate dimensions as px (1 DXF unit = 1 px) — useful when downstream code needs pixel-accurate coordinate correspondence.
 
 The `viewBox` always reflects the raw DXF coordinate space. Only the rendered `width`/`height` attributes are normalized.
 
@@ -441,6 +444,7 @@ Converts an uploaded DXF file.
 | `symbolMode` | `bool` | `false` | Output `<symbol>` wrapper |
 | `strokeScale` | `float` | `1.0` | Stroke width multiplier |
 | `background` | `str \| null` | `null` | Background color hex |
+| `preserveSize` | `bool` | `false` | Use raw DXF coordinate extent as px dimensions; bypasses default 800px normalization |
 
 **Response:** `application/json`
 
