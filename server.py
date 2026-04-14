@@ -49,6 +49,7 @@ def convert():
 
             cfg = BuildConfig(
                 flip_y=opts.get("flipY", True),
+                preserve_size=opts.get("preserveSize", False),
                 embed_css=opts.get("embedCSS", True),
                 symbol_mode=opts.get("symbolMode", False),
                 stroke_scale=float(opts.get("strokeScale", 1.0)),

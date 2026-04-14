@@ -43,6 +43,7 @@ DEFAULT_OUTPUT_SIZE = 800.0   # px — used when no target_width/height is set
 class BuildConfig:
     normalize_viewbox: bool = True
     flip_y: bool = True
+    preserve_size: bool = False            # True = use raw DXF coords as px dimensions
     target_width: Optional[float] = None   # None = preserve aspect ratio
     target_height: Optional[float] = None
     symbol_mode: bool = False              # Output <symbol> instead of inline
@@ -94,9 +95,11 @@ class SVGBuilder:
         vw = w + 2 * pad_x
         vh = h + 2 * pad_y
 
-        # Resolve target size — normalize to screen pixels when not specified.
-        # DXF units (mm, inches, unitless) must not be used directly as pixel
-        # dimensions, or the SVG renders as sub-pixel and is invisible.
+        # Resolve target size.
+        # Explicit target_width/height always wins.
+        # preserve_size=True uses raw DXF coordinate dimensions (1 DXF unit = 1 px).
+        # Default: normalize longest edge to DEFAULT_OUTPUT_SIZE px so the SVG is
+        # screen-visible (raw DXF units are physical and often sub-pixel or huge).
         if self.cfg.target_width and self.cfg.target_height:
             out_w, out_h = self.cfg.target_width, self.cfg.target_height
         elif self.cfg.target_width:
@@ -105,6 +108,9 @@ class SVGBuilder:
         elif self.cfg.target_height:
             out_h = self.cfg.target_height
             out_w = (vw / vh * out_h) if vh > 0 else out_h
+        elif self.cfg.preserve_size:
+            # Use raw DXF coordinate extent as pixel dimensions
+            out_w, out_h = vw, vh
         else:
             # Default: normalize longest edge to DEFAULT_OUTPUT_SIZE px
             if vw >= vh:
