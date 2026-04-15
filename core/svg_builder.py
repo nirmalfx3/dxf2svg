@@ -33,10 +33,13 @@ ACI_COLORS = {
     253: "#999999", 254: "#BBBBBB", 255: "#DDDDDD",
 }
 
-DEFAULT_STROKE      = "#1a1a2e"
-DEFAULT_LW_PX       = 1.0
-PADDING_FACTOR      = 0.05    # 5% padding around bounding box
-DEFAULT_OUTPUT_SIZE = 800.0   # px — used when no target_width/height is set
+DEFAULT_STROKE  = "#1a1a2e"
+DEFAULT_LW_PX   = 1.0
+
+PADDING_FACTOR  = 0.05          # 5 % padding around bounding box
+
+MIN_LW_MM       = 0.25          # minimum stroke lineweight floor (mm)
+MM_TO_PX        = 96.0 / 25.4   # CSS: 1 in = 96 px, 1 in = 25.4 mm  → 3.7795 px/mm
 
 
 @dataclass
@@ -51,7 +54,7 @@ class BuildConfig:
     embed_css: bool = True
     stroke_scale: float = 1.0             # Global stroke width multiplier
     font_family: str = "monospace"
-    background: Optional[str] = None      # None = transparent
+    background: Optional[str] = "white"   # None = transparent
 
 
 class SVGBuilder:
@@ -95,11 +98,13 @@ class SVGBuilder:
         vw = w + 2 * pad_x
         vh = h + 2 * pad_y
 
-        # Resolve target size.
-        # Explicit target_width/height always wins.
-        # preserve_size=True uses raw DXF coordinate dimensions (1 DXF unit = 1 px).
-        # Default: normalize longest edge to DEFAULT_OUTPUT_SIZE px so the SVG is
-        # screen-visible (raw DXF units are physical and often sub-pixel or huge).
+        # Output dimensions: 1:1 with DXF physical coordinates (which are in inches).
+        # width/height are always expressed in "in" units so any SVG viewer renders
+        # the symbol at its true physical size.
+        # The JS showPreview() normalises the preview to 800 px for screen display;
+        # vector-effect:non-scaling-stroke keeps stroke widths at their CSS-pixel
+        # values regardless of that zoom, so lines stay at the correct weight.
+        # target_width / target_height are explicit px overrides for programmatic use.
         if self.cfg.target_width and self.cfg.target_height:
             out_w, out_h = self.cfg.target_width, self.cfg.target_height
         elif self.cfg.target_width:
@@ -108,24 +113,20 @@ class SVGBuilder:
         elif self.cfg.target_height:
             out_h = self.cfg.target_height
             out_w = (vw / vh * out_h) if vh > 0 else out_h
-        elif self.cfg.preserve_size:
-            # Use raw DXF coordinate extent as pixel dimensions
-            out_w, out_h = vw, vh
         else:
-            # Default: normalize longest edge to DEFAULT_OUTPUT_SIZE px
-            if vw >= vh:
-                out_w = DEFAULT_OUTPUT_SIZE
-                out_h = (vh / vw * DEFAULT_OUTPUT_SIZE) if vw > 0 else DEFAULT_OUTPUT_SIZE
-            else:
-                out_h = DEFAULT_OUTPUT_SIZE
-                out_w = (vw / vh * DEFAULT_OUTPUT_SIZE) if vh > 0 else DEFAULT_OUTPUT_SIZE
+            # 1:1 — DXF inches become SVG inches
+            out_w, out_h = vw, vh
 
         # Root element
         svg = ET.Element("svg")
         svg.set("xmlns", "http://www.w3.org/2000/svg")
         svg.set("xmlns:xlink", "http://www.w3.org/1999/xlink")
-        svg.set("width",   f"{out_w:.4f}")
-        svg.set("height",  f"{out_h:.4f}")
+        if self.cfg.target_width or self.cfg.target_height:
+            svg.set("width",  f"{out_w:.4f}")
+            svg.set("height", f"{out_h:.4f}")
+        else:
+            svg.set("width",  f"{out_w:.4f}in")
+            svg.set("height", f"{out_h:.4f}in")
         svg.set("viewBox", f"{vx:.4f} {vy:.4f} {vw:.4f} {vh:.4f}")
 
         # Background
@@ -194,7 +195,7 @@ class SVGBuilder:
                 stroke = "#{:02X}{:02X}{:02X}".format(*info.rgb)
             elif info.color_index in ACI_COLORS:
                 stroke = ACI_COLORS[info.color_index]
-            lw = max(0.5, info.lineweight * 3.78) * self.cfg.stroke_scale  # mm→px approx
+            lw = max(MIN_LW_MM, info.lineweight) * MM_TO_PX * self.cfg.stroke_scale  # floor at 0.25 mm
 
         return {
             "class": f"layer-{layer_name.replace(' ', '_').replace('/', '_')}",
@@ -421,7 +422,10 @@ class SVGBuilder:
     def _build_css(self) -> str:
         lines = [
             "svg { font-family: monospace; }",
-            "line, polyline, polygon, path, circle, ellipse { vector-effect: non-scaling-stroke; }",
+            # stroke-width is in CSS pixels; non-scaling-stroke keeps it at that
+            # physical size regardless of how the SVG is zoomed or normalised.
+            "line, polyline, polygon, path, circle, ellipse"
+            " { vector-effect: non-scaling-stroke; }",
         ]
         for name in sorted(self._used_layers):
             info = self.layers.get(name)

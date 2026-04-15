@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-14 · v1.2 — Edit mode: rotate, flip, duplicate, appearance, block drilling
+> **Revision:** 2026-04-15 · v1.3 — Physical "in" SVG output; lineweight floor; raw_extents API field
 
 ---
 
@@ -139,22 +139,23 @@ cfg = BuildConfig(
 |-------|------|---------|-------------|
 | `flip_y` | `bool` | `True` | Flip Y-axis. DXF uses bottom-left origin; SVG uses top-left. **Always True for visual correctness.** |
 | `stroke_scale` | `float` | `1.0` | Global stroke width multiplier. Applied on top of layer lineweight. |
-| `target_width` | `float \| None` | `None` | Output SVG width in px. `None` = normalize longest edge to 800 px. |
-| `target_height` | `float \| None` | `None` | Output SVG height in px. `None` = derive from aspect ratio. |
-| `background` | `str \| None` | `None` | Background fill color (e.g. `"#ffffff"`, `"#0d0f14"`). `None` = transparent. |
+| `target_width` | `float \| None` | `None` | Explicit output width in px. `None` = use physical "in" units (see below). |
+| `target_height` | `float \| None` | `None` | Explicit output height in px. `None` = derive from aspect ratio or use physical units. |
+| `background` | `str \| None` | `"white"` | Background fill color (e.g. `"#ffffff"`, `"#0d0f14"`). `None` = transparent. |
 | `embed_css` | `bool` | `True` | Embed `<style>` block with per-layer CSS classes and colors. |
 | `symbol_mode` | `bool` | `False` | Wrap geometry in `<symbol id="...">` instead of root `<svg>`. Used by `symbol_library()`. |
 | `symbol_id` | `str` | `"symbol"` | XML `id` for the `<symbol>` element. Used when `symbol_mode=True`. |
 | `font_family` | `str` | `"monospace"` | CSS `font-family` for `<text>` elements. |
-| `preserve_size` | `bool` | `False` | Use raw DXF coordinate extent as px dimensions (1 DXF unit = 1 px). Overrides default 800px normalization; ignored when `target_width`/`target_height` are set. |
 
-### Output Size Normalization
+### Output Size
 
-When neither `target_width`/`target_height` nor `preserve_size` is set, the SVG is normalized so the longest edge = **800 px**, preserving aspect ratio. This is critical because DXF coordinates are in physical units (mm, inches, or unitless) — without normalization the SVG renders as sub-pixel and is invisible in the browser.
+When `target_width` / `target_height` are both `None`, the SVG `width` and `height` attributes are expressed in **physical inches** (e.g. `width="2.5in" height="1.0in"`), matching the DXF coordinate space 1:1. Any SVG viewer renders the symbol at its true physical size; browser JS that needs screen pixels normalises the `in` value itself.
 
-Set `preserve_size=True` to use raw DXF coordinate dimensions as px (1 DXF unit = 1 px) — useful when downstream code needs pixel-accurate coordinate correspondence.
+When `target_width` or `target_height` is set, those values are used as plain px dimensions and the other axis is derived from the aspect ratio.
 
-The `viewBox` always reflects the raw DXF coordinate space. Only the rendered `width`/`height` attributes are normalized.
+The `viewBox` always reflects the raw DXF coordinate space regardless of output size mode.
+
+Lineweight floor: all strokes are floored at **0.25 mm** before the mm→px conversion (`96 px/in ÷ 25.4 mm/in = 3.78 px/mm`), preventing sub-pixel hairlines. `stroke_scale` multiplies the result.
 
 ---
 
@@ -443,8 +444,7 @@ Converts an uploaded DXF file.
 | `embedCSS` | `bool` | `true` | Embed CSS layer styles |
 | `symbolMode` | `bool` | `false` | Output `<symbol>` wrapper |
 | `strokeScale` | `float` | `1.0` | Stroke width multiplier |
-| `background` | `str \| null` | `null` | Background color hex |
-| `preserveSize` | `bool` | `false` | Use raw DXF coordinate extent as px dimensions; bypasses default 800px normalization |
+| `background` | `str \| null` | `"white"` | Background color hex (`null` = transparent) |
 
 **Response:** `application/json`
 
@@ -452,6 +452,7 @@ Converts an uploaded DXF file.
 {
   "svg": "<svg xmlns=...>...</svg>",
   "entity_count": 47,
+  "raw_extents": { "width_in": 2.5, "height_in": 1.0 },
   "audit": {
     "file": "drawing.dxf",
     "blocks": { ... },

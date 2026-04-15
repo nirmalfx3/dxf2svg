@@ -614,10 +614,6 @@
         <div class="toggle" id="toggleSymbol" onclick="toggleOpt('symbolMode',this)"></div>
       </div>
       <div class="control-row">
-        <label>Preserve original size</label>
-        <div class="toggle" id="togglePreserveSize" onclick="toggleOpt('preserveSize',this)"></div>
-      </div>
-      <div class="control-row">
         <label>Stroke scale</label>
         <input type="range" id="strokeScale" min="0.5" max="4" step="0.5" value="1"
                oninput="document.getElementById('strokeVal').textContent=this.value+'×'">
@@ -627,7 +623,7 @@
         <label>Background</label>
         <select id="bgSelect">
           <option value="">Transparent</option>
-          <option value="#ffffff">White</option>
+          <option value="#ffffff" selected>White</option>
           <option value="#0d0f14">Dark</option>
           <option value="#f0f4f8">Light Grey</option>
         </select>
@@ -780,7 +776,7 @@ let state = {
   zoomLevel: 1.0,
   options: {
     flipY: true, unfold: true, embedCSS: true,
-    symbolMode: false, preserveSize: false, strokeScale: 1.0, background: ''
+    symbolMode: false, strokeScale: 1.0, background: '#ffffff'
   }
 };
 
@@ -905,7 +901,7 @@ async function startConvert() {
       unfold: state.options.unfold,
       embedCSS: state.options.embedCSS,
       symbolMode: state.options.symbolMode,
-      preserveSize: state.options.preserveSize,
+
       strokeScale: state.options.strokeScale,
       background: state.options.background,
     }));
