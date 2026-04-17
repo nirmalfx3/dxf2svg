@@ -13,7 +13,7 @@ Modes:
 import json
 import logging
 import os
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from .core.extractor import DXFExtractor
 from .core.svg_builder import SVGBuilder, BuildConfig
@@ -44,6 +44,7 @@ class DXFConverter:
         self.dxf_path = dxf_path
         self.extractor = DXFExtractor(dxf_path, unfold_all_layers=unfold_all_layers)
         self.last_entity_count: int = 0
+        self.last_raw_extents: Optional[Tuple[float, float]] = None  # (width_in, height_in) pre-padding
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ class DXFConverter:
         builder.add_entities(entities)
         svg_str = builder.build()
         self.last_entity_count = builder.entity_count
+        self.last_raw_extents = builder.last_raw_extents
 
         _write(output_path, svg_str)
         logger.info(f"Saved: {output_path}")
@@ -89,6 +91,7 @@ class DXFConverter:
         builder.add_entities(entities)
         svg_str = builder.build()
         self.last_entity_count = builder.entity_count
+        self.last_raw_extents = builder.last_raw_extents
 
         _write(output_path, svg_str)
         logger.info(f"Saved: {output_path}")

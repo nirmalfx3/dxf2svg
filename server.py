@@ -80,6 +80,7 @@ def convert():
                 return jsonify({"error": f"Unknown mode: {mode}"}), 400
 
             entity_count = conv.last_entity_count
+            raw_w, raw_h = conv.last_raw_extents if conv.last_raw_extents else (None, None)
 
             # Serialize audit and layer info
             audit_json = json.loads(conv.audit())
@@ -87,6 +88,7 @@ def convert():
             return jsonify({
                 "svg": svg_str,
                 "entity_count": entity_count,
+                "raw_extents": {"width_in": raw_w, "height_in": raw_h},
                 "audit": audit_json,
                 "layers": {
                     name: {

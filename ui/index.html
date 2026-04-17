@@ -416,6 +416,11 @@
     flex-shrink: 0;
   }
   .statusbar .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .sb-sep { color: var(--border); margin: 0 -4px; }
+  .sb-arrow { color: var(--text-dim); margin: 0 2px; font-size: 11px; }
+  #dxfDim  { color: var(--accent);  letter-spacing: 0.02em; }
+  #svgDim  { color: var(--accent2); letter-spacing: 0.02em; }
+  #svgDim .pad-note { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
   .dot.ready  { background: var(--accent); }
   .dot.busy   { background: var(--accent2); animation: pulse 1s infinite; }
   .dot.idle   { background: var(--border); }
@@ -746,6 +751,11 @@
   <span id="statusText">Ready — load a DXF file</span>
   <div class="sb-spacer"></div>
   <span id="entityCount"></span>
+  <span class="sb-sep" id="dimSep" style="display:none">|</span>
+  <span id="dxfDim"></span>
+  <span class="sb-arrow" id="dimArrow" style="display:none">→</span>
+  <span id="svgDim"></span>
+  <span class="sb-sep" id="sizeSep" style="display:none">|</span>
   <span id="svgSize"></span>
 </div>
 
@@ -919,7 +929,28 @@ async function startConvert() {
 
     const size = (new Blob([data.svg]).size / 1024).toFixed(1);
     document.getElementById('entityCount').textContent = `${data.entity_count} entities`;
-    document.getElementById('svgSize').textContent = `${size} KB SVG`;
+    document.getElementById('svgSize').textContent = `${size} KB`;
+
+    // DXF raw geometry extents (no padding) — from server response
+    if (data.raw_extents && data.raw_extents.width_in != null) {
+      const rw = data.raw_extents.width_in, rh = data.raw_extents.height_in;
+      const rwmm = (rw * 25.4).toFixed(2), rhmm = (rh * 25.4).toFixed(2);
+      document.getElementById('dxfDim').textContent =
+        `DXF  ${rw.toFixed(4)} × ${rh.toFixed(4)} in  (${rwmm} × ${rhmm} mm)`;
+    }
+    // SVG output extents (viewBox = raw + 5% padding each side)
+    const vbMatch = data.svg.match(/viewBox="([\-\d.\s]+)"/);
+    if (vbMatch) {
+      const [, , vw, vh] = vbMatch[1].trim().split(/\s+/).map(Number);
+      const wmm = (vw * 25.4).toFixed(2), hmm = (vh * 25.4).toFixed(2);
+      const svgDimEl = document.getElementById('svgDim');
+      svgDimEl.innerHTML =
+        `SVG  ${vw.toFixed(4)} × ${vh.toFixed(4)} in  (${wmm} × ${hmm} mm)`
+        + `<span class="pad-note">(+5% padding)</span>`;
+      document.getElementById('dimSep').style.display   = '';
+      document.getElementById('dimArrow').style.display = '';
+      document.getElementById('sizeSep').style.display  = '';
+    }
 
     log('ok', `Conversion complete — ${data.entity_count} entities → ${size} KB`);
     setStatus('ready', 'Conversion complete');
@@ -940,11 +971,9 @@ async function startConvert() {
 function showPreview(svgStr) {
   const area = document.getElementById('previewArea');
   area.innerHTML = `<div class="preview-svg-wrap" id="svgWrap" style="transform:scale(${state.zoomLevel})">${svgStr}</div>`;
-  // Normalize display dimensions so the preview is always visible.
-  // When preserve_size=true the SVG width/height are raw DXF coordinates
-  // (e.g. 50 mm) which render as invisible dots or browser-crashing giant
-  // canvases. Override for display only — state.svgResult (used by Save SVG)
-  // already holds the original string with the correct preserved dimensions.
+  // SVG width/height are in physical inches (e.g. "0.5442in") — tiny on screen.
+  // Normalise to 800 px for the preview workspace; state.svgResult retains the
+  // original 1:1 file so Save SVG always writes the correct physical dimensions.
   const svgEl = area.querySelector('svg');
   if (svgEl) {
     const vb = svgEl.viewBox.baseVal;

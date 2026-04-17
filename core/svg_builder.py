@@ -69,6 +69,7 @@ class SVGBuilder:
         self._entities = []
         self._used_layers: set = set()
         self._layer_attr_cache: Dict[str, Dict[str, str]] = {}
+        self.last_raw_extents: Optional[Tuple[float, float]] = None  # (width_in, height_in) pre-padding
 
     def add_entities(self, entity_iter):
         """Consume extractor output."""
@@ -89,6 +90,7 @@ class SVGBuilder:
         min_x, min_y, max_x, max_y = bbox
         w = max_x - min_x
         h = max_y - min_y
+        self.last_raw_extents = (w, h)   # raw geometry extents before padding
         pad_x = w * PADDING_FACTOR
         pad_y = h * PADDING_FACTOR
 
