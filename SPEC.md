@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-15 · v1.3 — Physical "in" SVG output; lineweight floor; raw_extents API field
+> **Revision:** 2026-04-19 · v1.4 — INSERT placement fixes (base_point, matrix order, arc angle sign); test suite added
 
 ---
 
@@ -85,7 +85,7 @@ GitHub: https://github.com/nirmalfx3/dxf2svg
 | `MTEXT` | `<text>` | Same as TEXT; rich formatting stripped |
 | `SOLID` | `<polygon>` | Filled with layer stroke color |
 | `HATCH` | `<polyline>` | Boundary extraction only — fill pattern not rendered |
-| `INSERT` (nested block) | Recursively resolved | Full Matrix44 chain; cycle guard prevents infinite loops |
+| `INSERT` (nested block) | Recursively resolved | Full Matrix44 chain via `ins.matrix44()` (handles base_point, rotation, scale); cycle guard prevents infinite loops; same block can appear at multiple positions |
 
 ### Skipped Entities
 
@@ -188,6 +188,8 @@ Input .dxf file
         │
         ▼  DXFExtractor.extract(block_name) | extract_block(block_name)
         │  Recursively walks INSERT entities using Matrix44 transform stack
+        │  Each INSERT: local_m = ins.matrix44() (handles base_point, rotation, scale)
+        │  Compound: local_m @ parent_m  (row-vector convention — child→parent first)
         │  Converts each DXF entity → typed ExtXxx dataclass
         │  Cycle guard: set of visited block names prevents infinite recursion
         │  Yields: Iterator[ExtLine | ExtCircle | ExtArc | ...]
@@ -621,7 +623,11 @@ results = conv.symbol_library(
 
 7. **Layer name sanitization.** Layer names are sanitized for CSS class names: spaces and slashes become underscores. Class names take the form `layer-NAME`.
 
-8. **Cycle guard.** The block traversal tracks visited block names per traversal call. Self-referencing or mutually referencing blocks in malformed DXF files are silently skipped after the first visit.
+8. **Cycle guard.** Block traversal uses an add-before/discard-after pattern (block added to `_visited_blocks` before recursing, discarded after returning). This correctly prevents infinite cycles in self-referencing blocks while still allowing the **same block to appear at multiple INSERT positions** (sequential, not nested). `*Model_Space` is deliberately excluded from the guard.
+
+9. **INSERT transform math.** `ins.matrix44()` (ezdxf built-in) is used for all INSERT transforms — it correctly subtracts the block `base_point` from the translation component, applies rotation, and scales. Manual matrix construction must not be used. ezdxf uses **row-vector convention** (`m.transform(v) = v @ m`), so compound matrices are composed as `local_m @ parent_m` (child→parent first), not `parent_m @ local_m`. The two are only equivalent for pure translations; any rotation component makes the order critical.
+
+10. **Arc angle convention.** `ExtArc.start_angle` and `end_angle` are in world-space degrees after all parent transforms are applied. The rotation contribution from `_rotation_from_matrix(m)` is added to the block-local angles. In ezdxf's row-vector rotation matrix, `m[1,0] = −sin θ`; the extractor negates this to correctly recover `sin θ` → `atan2(sin, cos) = +θ`.
 
 ---
 
@@ -685,3 +691,18 @@ results = conv.symbol_library(
     config=BuildConfig(flip_y=True, symbol_mode=True),
 )
 ```
+
+### Tests
+
+```bash
+# Run full test suite (16 tests)
+G:/dxf2svg/.venv/Scripts/pytest tests/ -v
+```
+
+**Test files:**
+
+| File | Coverage |
+|------|----------|
+| `tests/test_insert_placement.py` | INSERT base_point alignment, nested inserts, rotation compound matrix, arc angles in rotated blocks, same-block multi-insert (cycle guard regression) |
+| `tests/test_buildconfig.py` | `preserve_size` field removed, default field values |
+| `tests/test_server.py` | Upload size cap (50 MB), debug mode off, DXF extension + binary-content validation, 413 handler |

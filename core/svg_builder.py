@@ -205,16 +205,21 @@ class SVGBuilder:
             "fill": "none",
         }
 
-    def _apply_attrs(self, elem: ET.Element, layer: str):
+    def _apply_attrs(self, elem: ET.Element, layer: str, color_override=None):
+        """Apply layer-derived CSS class and stroke attrs, then apply any entity-level colour."""
         attrs = self._layer_attr_cache.get(layer) or self._layer_attrs(layer)
         for k, v in attrs.items():
             elem.set(k, v)
+        # Entity-level colour (true_color or explicit ACI) overrides the layer colour.
+        # The inline stroke= attribute has higher specificity than the CSS class rule.
+        if color_override is not None:
+            elem.set("stroke", "#{:02X}{:02X}{:02X}".format(*color_override))
 
     def _svg_line(self, e: ExtLine) -> ET.Element:
         el = ET.Element("line")
         el.set("x1", f"{e.x1:.4f}"); el.set("y1", f"{e.y1:.4f}")
         el.set("x2", f"{e.x2:.4f}"); el.set("y2", f"{e.y2:.4f}")
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_circle(self, e: ExtCircle) -> ET.Element:
@@ -227,14 +232,14 @@ class SVGBuilder:
             el = ET.Element("ellipse")
             el.set("cx", f"{e.cx:.4f}"); el.set("cy", f"{e.cy:.4f}")
             el.set("rx", f"{e.rx:.4f}"); el.set("ry", f"{e.ry:.4f}")
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_arc(self, e: ExtArc) -> ET.Element:
         path = self._arc_to_path(e.cx, e.cy, e.rx, e.ry, e.start_angle, e.end_angle)
         el = ET.Element("path")
         el.set("d", path)
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_polyline(self, e: ExtPolyline) -> ET.Element:
@@ -244,7 +249,7 @@ class SVGBuilder:
         tag = "polygon" if e.closed else "polyline"
         el = ET.Element(tag)
         el.set("points", pts)
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_spline(self, e: ExtSpline) -> ET.Element:
@@ -257,7 +262,7 @@ class SVGBuilder:
             d += " Z"
         el = ET.Element("path")
         el.set("d", d)
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_ellipse(self, e: ExtEllipse) -> ET.Element:
@@ -266,7 +271,7 @@ class SVGBuilder:
         el.set("rx", f"{e.rx:.4f}"); el.set("ry", f"{e.ry:.4f}")
         if abs(e.rotation) > 0.001:
             el.set("transform", f"rotate({e.rotation:.4f},{e.cx:.4f},{e.cy:.4f})")
-        self._apply_attrs(el, e.layer)
+        self._apply_attrs(el, e.layer, e.color)
         return el
 
     def _svg_text(self, e: ExtText) -> ET.Element:
@@ -274,15 +279,35 @@ class SVGBuilder:
         el.set("x", f"{e.x:.4f}"); el.set("y", f"{e.y:.4f}")
         el.set("font-size", f"{e.height:.4f}")
         el.set("font-family", self.cfg.font_family)
+
+        # Map DXF halign → SVG text-anchor so centered/right text lands
+        # on the correct visual position without repositioning the anchor.
+        if e.h_align in (1, 4):        # center / middle
+            el.set("text-anchor", "middle")
+        elif e.h_align == 2:           # right
+            el.set("text-anchor", "end")
+        # else: left / aligned / fit / default → "start" (SVG default, no attribute needed)
+
+        # Map DXF valign → SVG dominant-baseline
+        if e.v_align == 2:             # middle
+            el.set("dominant-baseline", "central")
+        elif e.v_align == 3:           # top
+            el.set("dominant-baseline", "hanging")
+        # else: baseline / bottom → SVG auto default, no attribute needed
+
+        # Rotation (negated for Y-flip) + local Y-un-flip transform.
         if abs(e.rotation) > 0.001:
             el.set("transform", f"rotate({-e.rotation:.4f},{e.x:.4f},{e.y:.4f})")
         if self.cfg.flip_y:
             cur = el.get("transform", "")
             flip = f"scale(1,-1) translate(0,{-2*e.y:.4f})"
             el.set("transform", f"{cur} {flip}".strip())
+
+        # Colour: entity override wins over layer colour.
         attrs = self._layer_attr_cache.get(e.layer) or self._layer_attrs(e.layer)
         el.set("class", attrs["class"])
-        el.set("fill", attrs["stroke"])
+        fill = "#{:02X}{:02X}{:02X}".format(*e.color) if e.color is not None else attrs["stroke"]
+        el.set("fill", fill)
         el.set("stroke", "none")
         el.text = e.text
         return el
@@ -293,8 +318,10 @@ class SVGBuilder:
         el.set("points", pts)
         attrs = self._layer_attr_cache.get(e.layer) or self._layer_attrs(e.layer)
         el.set("class", attrs["class"])
-        el.set("fill", attrs["stroke"])
-        el.set("stroke", attrs["stroke"])
+        # Entity colour override for filled shapes: both stroke and fill use it.
+        stroke = "#{:02X}{:02X}{:02X}".format(*e.color) if e.color is not None else attrs["stroke"]
+        el.set("fill", stroke)
+        el.set("stroke", stroke)
         el.set("stroke-width", attrs["stroke-width"])
         return el
 
