@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-19 · v1.4 — INSERT placement fixes (base_point, matrix order, arc angle sign); test suite added
+> **Revision:** 2026-04-19 · v1.4 — INSERT placement fixes (base_point, matrix order, arc angle sign); entity-level color (true_color + ACI override); text alignment (align_point, h_align/v_align → SVG text-anchor); full ACI-255 color table; test suite added
 
 ---
 
@@ -103,15 +103,17 @@ All entities are normalized into these dataclasses before SVG rendering:
 
 | Class | Fields |
 |-------|--------|
-| `ExtLine` | `x1, y1, x2, y2, layer` |
-| `ExtCircle` | `cx, cy, rx, ry, layer` |
-| `ExtArc` | `cx, cy, rx, ry, start_angle, end_angle, layer` |
-| `ExtPolyline` | `points: List[(x,y)], closed: bool, layer` — emitted only for HATCH boundary paths; LWPOLYLINE/POLYLINE decompose to `ExtLine`/`ExtArc` |
-| `ExtSpline` | `points: List[(x,y)], closed: bool, layer` — dense evaluated points from `flattening()` |
-| `ExtEllipse` | `cx, cy, rx, ry, rotation, layer` |
-| `ExtText` | `x, y, text, height, rotation, layer` |
-| `ExtSolid` | `points: List[(x,y)], layer` |
+| `ExtLine` | `x1, y1, x2, y2, layer, color: Optional[Tuple[int,int,int]]` |
+| `ExtCircle` | `cx, cy, rx, ry, layer, color` |
+| `ExtArc` | `cx, cy, rx, ry, start_angle, end_angle, layer, color` |
+| `ExtPolyline` | `points: List[(x,y)], closed: bool, layer, color` — emitted only for HATCH boundary paths; LWPOLYLINE/POLYLINE decompose to `ExtLine`/`ExtArc` |
+| `ExtSpline` | `points: List[(x,y)], closed: bool, layer, color` — dense evaluated points from `flattening()` |
+| `ExtEllipse` | `cx, cy, rx, ry, rotation, layer, color` |
+| `ExtText` | `x, y, text, height, rotation, layer, is_mtext, color, h_align: int, v_align: int` |
+| `ExtSolid` | `points: List[(x,y)], layer, color` |
 | `LayerInfo` | `name, color_index (ACI), rgb: Tuple, linetype, lineweight (mm)` |
+
+`color = None` means BYLAYER — the layer's own `rgb` is used. `color = (R, G, B)` is an entity-level override (true_color group code 420 or explicit ACI 1–255). See Convention 11.
 
 ---
 
@@ -603,7 +605,7 @@ results = conv.symbol_library(
 | MTEXT rich formatting | Bold, italic, color overrides, and embedded fields in MTEXT are stripped to plain text. |
 | Attributed INSERTs | ATTRIB entities are extracted only when they behave like standard TEXT entities. |
 | Linked XREFs | External references (XREFs) are not resolved. |
-| ACI color coverage | Only ~25 ACI values are mapped to hex. Unmapped indices fall back to `#1a1a2e`. |
+| MTEXT entity color | MTEXT color overrides are stripped with rich formatting; only the entity-level `true_color`/ACI is preserved. |
 
 ---
 
@@ -628,6 +630,10 @@ results = conv.symbol_library(
 9. **INSERT transform math.** `ins.matrix44()` (ezdxf built-in) is used for all INSERT transforms — it correctly subtracts the block `base_point` from the translation component, applies rotation, and scales. Manual matrix construction must not be used. ezdxf uses **row-vector convention** (`m.transform(v) = v @ m`), so compound matrices are composed as `local_m @ parent_m` (child→parent first), not `parent_m @ local_m`. The two are only equivalent for pure translations; any rotation component makes the order critical.
 
 10. **Arc angle convention.** `ExtArc.start_angle` and `end_angle` are in world-space degrees after all parent transforms are applied. The rotation contribution from `_rotation_from_matrix(m)` is added to the block-local angles. In ezdxf's row-vector rotation matrix, `m[1,0] = −sin θ`; the extractor negates this to correctly recover `sin θ` → `atan2(sin, cos) = +θ`.
+
+11. **Entity-level color resolution.** `_entity_rgb(entity)` returns `(R, G, B)` or `None` using AutoCAD priority order: (1) `true_color` group code 420 — 24-bit explicit RGB, always wins; (2) `color` group code 62 ACI 1–255 — looked up in `_ACI_TABLE` (full `DXF_DEFAULT_COLORS` covering all 255 ACI values, normalised to dict at import time to handle both list and dict ezdxf API variants); (3) 256/BYLAYER or 0/BYBLOCK → return `None` (caller uses layer colour). LWPOLYLINE/POLYLINE propagate the parent entity's color to their virtual LINE/ARC children via a `color_override` parameter. In `SVGBuilder._apply_attrs()`, a non-`None` color adds an inline `stroke="#{RR}{GG}{BB}"` that overrides the layer CSS class stroke.
+
+12. **Text alignment.** `ExtText` carries `h_align` (DXF group code 72) and `v_align` (group code 73). For center (1), right (2), aligned (3), middle (4), or fit (5) horizontal alignment, the visual anchor is `align_point` (group code 11), not `insert` (group code 10) — the extractor switches to `align_point` for these modes. `SVGBuilder` maps `h_align` → SVG `text-anchor` (`middle` for 1/4, `end` for 2; `start` is the SVG default and is not emitted). `v_align` → `dominant-baseline` (`central` for middle=2, `hanging` for top=3; baseline/bottom use the SVG auto default).
 
 ---
 
@@ -695,7 +701,7 @@ results = conv.symbol_library(
 ### Tests
 
 ```bash
-# Run full test suite (16 tests)
+# Run full test suite (30 tests)
 G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 ```
 
@@ -706,3 +712,4 @@ G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 | `tests/test_insert_placement.py` | INSERT base_point alignment, nested inserts, rotation compound matrix, arc angles in rotated blocks, same-block multi-insert (cycle guard regression) |
 | `tests/test_buildconfig.py` | `preserve_size` field removed, default field values |
 | `tests/test_server.py` | Upload size cap (50 MB), debug mode off, DXF extension + binary-content validation, 413 handler |
+| `tests/test_entity_colors.py` | ACI color override → RGB; true_color override; BYLAYER → `None`; true_color beats ACI; entity color in SVG stroke; BYLAYER uses layer color; LWPOLYLINE color forwarded to children; center/right text uses align_point; h_align/v_align stored; SVG text-anchor middle/end; left text no text-anchor |
