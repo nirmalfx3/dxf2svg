@@ -428,9 +428,11 @@ Converts an uploaded DXF file.
 
 **Request:** `multipart/form-data`
 
+**Upload constraints:** max 50 MB; filename must end in `.dxf`; file content must be plain-text ASCII/UTF-8 (binary blobs are rejected with HTTP 400).
+
 | Field | Type | Description |
 |-------|------|-------------|
-| `file` | file | The `.dxf` file to convert |
+| `file` | file | The `.dxf` file to convert (max 50 MB) |
 | `options` | JSON string | Conversion options (see below) |
 
 **Options JSON fields:**
@@ -611,11 +613,11 @@ results = conv.symbol_library(
 
 3. **Y-flip is always on.** `flip_y=True` is the default and should never be disabled for visual output. DXF origin is bottom-left; SVG origin is top-left.
 
-4. **Output size normalization.** Raw DXF coordinates must never be used as SVG pixel dimensions. The builder normalizes to 800 px (longest edge) when no target size is given.
+4. **Output size is 1:1 physical inches.** When `target_width`/`target_height` are both `None`, the SVG `width` and `height` are expressed in physical inch units (e.g. `width="2.5in"`), matching DXF coordinates 1:1. Raw DXF coordinates become SVG coordinates directly — no pixel normalisation is applied. JS display code that needs screen pixels normalises the `in` value itself (`showPreview()` in the web UI normalises to 800 px for the preview workspace).
 
 5. **Symbol mode.** `symbol_mode=True` wraps all geometry in `<symbol id="...">` for use in `<defs>`. The combined `symbol_library.svg` produced by `symbol_library()` is a hidden `<svg><defs>` container referenced via `<use href="...#id">`.
 
-6. **Stroke widths.** Computed as `max(0.5, lineweight_mm × 3.78) × stroke_scale`. The `vector-effect: non-scaling-stroke` CSS property is always applied, so strokes render at a consistent visual weight regardless of zoom.
+6. **Stroke widths.** Computed as `max(MIN_LW_MM, lineweight_mm) × MM_TO_PX × stroke_scale`, where `MIN_LW_MM = 0.25` mm and `MM_TO_PX = 96 / 25.4 ≈ 3.7795 px/mm`. This floors all strokes at **0.25 mm (0.945 px)**, preventing sub-pixel hairlines. The `vector-effect: non-scaling-stroke` CSS property is always applied, so strokes render at a consistent visual weight regardless of zoom.
 
 7. **Layer name sanitization.** Layer names are sanitized for CSS class names: spaces and slashes become underscores. Class names take the form `layer-NAME`.
 

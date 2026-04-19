@@ -93,22 +93,6 @@ class ExtSolid:
 # Helpers
 # ─────────────────────────────────────────────
 
-def _build_insert_matrix(ins: Insert) -> Matrix44:
-    """Compose the local transform for a single INSERT entity."""
-    dxf = ins.dxf
-    tx = dxf.get("insert", Vec3(0, 0, 0))
-    rot = math.radians(dxf.get("rotation", 0.0))
-    sx  = dxf.get("xscale", 1.0)
-    sy  = dxf.get("yscale", 1.0)
-    sz  = dxf.get("zscale", 1.0)
-
-    m = (
-        Matrix44.translate(tx.x, tx.y, tx.z)
-        @ Matrix44.z_rotate(rot)
-        @ Matrix44.scale(sx, sy, sz)
-    )
-    return m
-
 
 def _scale_from_matrix(m: Matrix44) -> Tuple[float, float]:
     """Extract effective X and Y scale magnitudes from a Matrix44."""
@@ -118,12 +102,18 @@ def _scale_from_matrix(m: Matrix44) -> Tuple[float, float]:
 
 
 def _rotation_from_matrix(m: Matrix44) -> float:
-    """Extract Z-rotation (degrees) from matrix, accounting for scale."""
+    """Extract Z-rotation (degrees) from matrix, accounting for scale.
+
+    ezdxf uses ROW-vector convention: for CCW rotation θ,
+      Row 0 = [cos θ,  sin θ, 0, 0]
+      Row 1 = [-sin θ, cos θ, 0, 0]
+    so m[1,0] = -sin θ — negate it to recover sin θ.
+    """
     sx, _ = _scale_from_matrix(m)
     if sx == 0:
         return 0.0
-    cos_a = m[0, 0] / sx
-    sin_a = m[1, 0] / sx
+    cos_a =  m[0, 0] / sx
+    sin_a = -m[1, 0] / sx   # negate: row-vector stores -sin(θ) at m[1,0]
     return math.degrees(math.atan2(sin_a, cos_a))
 
 
@@ -226,7 +216,6 @@ class DXFExtractor:
             return
 
         # Cycle guard (malformed DXF self-referencing blocks)
-        key = (block_name, id(parent_m))
         if block_name in self._visited_blocks and block_name != "*Model_Space":
             logger.debug(f"Cycle guard hit for block: {block_name}")
             return
@@ -275,8 +264,19 @@ class DXFExtractor:
     # ── entity handlers ──────────────────────────────────────────────────────
 
     def _handle_insert(self, ins, parent_m):
-        local_m  = _build_insert_matrix(ins)
-        compound = parent_m @ local_m
+        # ins.matrix44() returns the complete local transform for this INSERT:
+        # scale → rotate → translate, with the block's base_point subtracted so
+        # the block's snap-point aligns with the insertion coordinate.
+        #
+        # Matrix composition — ezdxf uses ROW vectors  (m.transform(v) = v @ m):
+        #   compound = local_m @ parent_m
+        #   P @ compound = (P @ local_m) @ parent_m
+        #                   child→parent     parent→world
+        #
+        # parent_m @ local_m reverses the order: correct only for pure translations
+        # (which are commutative), wrong once any INSERT has a rotation component.
+        local_m  = ins.matrix44()
+        compound = local_m @ parent_m
         child_block = ins.dxf.name
         logger.debug(f"  INSERT → '{child_block}'")
         yield from self._walk_block(child_block, compound)

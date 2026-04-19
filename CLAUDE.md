@@ -17,6 +17,7 @@ The wiki holds cross-project context: how ELiGen uses dxf2svg, the full integrat
 | How ELiGen uses dxf2svg | `suite/integration-topology.md` |
 | How dxf2svg fits into the suite | `projects/dxf2svg.md` |
 | Adding a new tool or interface | `patterns/new-suite-tool.md` |
+| Running or interpreting a framework audit | `patterns/framework-audit.md` + `audits/dxf2svg.md` |
 
 When dxf2svg changes its Python API or supported entities, update `projects/dxf2svg.md` in place.
 

@@ -10,6 +10,7 @@ Open:     http://localhost:5000
 
 import os, json, tempfile, traceback
 from flask import Flask, request, jsonify, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 # Add parent dir to path when running from dxf2svg/ subfolder
 import sys
@@ -19,6 +20,35 @@ from dxf2svg.converter import DXFConverter
 from dxf2svg.core.svg_builder import BuildConfig
 
 app = Flask(__name__, static_folder="ui", static_url_path="")
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB — DX-SEC-002
+
+
+@app.errorhandler(413)
+def payload_too_large(e):
+    return jsonify({"error": "File too large — maximum upload size is 50 MB"}), 413
+
+
+def _validate_dxf_upload(file):
+    """
+    Validate an uploaded file as a DXF.  Returns (error_msg, status_code) on
+    failure, or (None, None) on success.  DX-SEC-003.
+    """
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".dxf"):
+        return "Only .dxf files are accepted", 400
+
+    # Sniff first 16 bytes — DXF is plain ASCII/UTF-8 text.
+    # Binary files (JPEG, ZIP, PNG, ELF …) have bytes outside printable ASCII.
+    header = file.read(16)
+    file.seek(0)
+    check = header[3:] if header.startswith(b'\xef\xbb\xbf') else header  # skip UTF-8 BOM
+    if check and not all(
+        b == 0x09 or b == 0x0A or b == 0x0D or (0x20 <= b <= 0x7E)
+        for b in check
+    ):
+        return "File does not appear to be a DXF (non-text content detected)", 400
+
+    return None, None
 
 
 @app.route("/")
@@ -35,6 +65,11 @@ def convert():
         if not file:
             return jsonify({"error": "No file uploaded"}), 400
 
+        # Validate extension + binary content — DX-SEC-003
+        err, code = _validate_dxf_upload(file)
+        if err:
+            return jsonify({"error": err}), code
+
         # Save to temp file
         suffix = ".dxf"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -49,7 +84,6 @@ def convert():
 
             cfg = BuildConfig(
                 flip_y=opts.get("flipY", True),
-                preserve_size=opts.get("preserveSize", False),
                 embed_css=opts.get("embedCSS", True),
                 symbol_mode=opts.get("symbolMode", False),
                 stroke_scale=float(opts.get("strokeScale", 1.0)),
@@ -106,6 +140,8 @@ def convert():
             if os.path.exists(svg_out):
                 os.unlink(svg_out)
 
+    except HTTPException:
+        raise  # let Flask's error handlers (e.g. 413) deal with HTTP exceptions
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -118,6 +154,9 @@ def list_blocks():
         file = request.files.get("file")
         if not file:
             return jsonify({"error": "No file"}), 400
+        err, code = _validate_dxf_upload(file)
+        if err:
+            return jsonify({"error": err}), code
         with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
             tmp_path = tmp.name
             file.save(tmp_path)
@@ -127,6 +166,8 @@ def list_blocks():
             return jsonify({"blocks": blocks})
         finally:
             os.unlink(tmp_path)
+    except HTTPException:
+        raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -136,4 +177,4 @@ if __name__ == "__main__":
     print("  ---------------------")
     print("  Open:  http://localhost:5000")
     print("  Stop:  Ctrl+C\n")
-    app.run(debug=True, port=5000)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "").lower() == "true", port=5000)  # DX-SEC-001

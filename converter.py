@@ -143,8 +143,10 @@ class DXFConverter:
         Return a JSON report of block structure, entity counts, and layer info.
         Useful for diagnosing what's in the DXF before converting.
         """
-        # Walk all blocks to populate audit data
-        _ = list(self.extractor.extract("*Model_Space"))
+        # DX-PERF-001: only re-walk when audit data isn't already populated
+        # (full_drawing / block_to_svg populate extractor._audit as a side effect).
+        if not self.extractor.audit:
+            _ = list(self.extractor.extract("*Model_Space"))
 
         report = {
             "file": os.path.basename(self.dxf_path),

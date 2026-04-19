@@ -46,7 +46,6 @@ MM_TO_PX        = 96.0 / 25.4   # CSS: 1 in = 96 px, 1 in = 25.4 mm  → 3.7795 
 class BuildConfig:
     normalize_viewbox: bool = True
     flip_y: bool = True
-    preserve_size: bool = False            # True = use raw DXF coords as px dimensions
     target_width: Optional[float] = None   # None = preserve aspect ratio
     target_height: Optional[float] = None
     symbol_mode: bool = False              # Output <symbol> instead of inline
@@ -323,44 +322,6 @@ class SVGBuilder:
         y2 = cy + ry * math.sin(e_rad)
         large = 1 if delta > 180.0 else 0
         return f"M {x1:.4f},{y1:.4f} A {rx:.4f},{ry:.4f} 0 {large} 1 {x2:.4f},{y2:.4f}"
-
-    def _spline_to_path(self, points: list, closed: bool) -> str:
-        """Approximate spline as cubic bezier via Catmull-Rom conversion."""
-        if len(points) == 2:
-            x1, y1 = points[0]; x2, y2 = points[1]
-            return f"M {x1:.4f},{y1:.4f} L {x2:.4f},{y2:.4f}"
-
-        def catmull_to_bezier(p0, p1, p2, p3, alpha=0.5):
-            def tj(ti, pi, pj):
-                dx = pj[0]-pi[0]; dy = pj[1]-pi[1]
-                return ti + (dx*dx + dy*dy) ** (alpha * 0.5)
-            t0=0; t1=tj(t0,p0,p1); t2=tj(t1,p1,p2); t3=tj(t2,p2,p3)
-            if t1==t0: t1=t0+1e-6
-            if t2==t1: t2=t1+1e-6
-            if t3==t2: t3=t2+1e-6
-            c1x = (t2-t1)/(t2-t0) * ((p1[0]-p0[0])/(t1-t0) - (p2[0]-p0[0])/(t2-t0)) + (p2[0]-p1[0])/(t2-t1)
-            c1y = (t2-t1)/(t2-t0) * ((p1[1]-p0[1])/(t1-t0) - (p2[1]-p0[1])/(t2-t0)) + (p2[1]-p1[1])/(t2-t1)
-            c2x = (t2-t1)/(t3-t1) * ((p3[0]-p2[0])/(t3-t2) - (p3[0]-p1[0])/(t3-t1)) + (p2[0]-p1[0])/(t2-t1)
-            c2y = (t2-t1)/(t3-t1) * ((p3[1]-p2[1])/(t3-t2) - (p3[1]-p1[1])/(t3-t1)) + (p2[1]-p1[1])/(t2-t1)
-            bx1 = p1[0] + c1x * (t2-t1)/3
-            by1 = p1[1] + c1y * (t2-t1)/3
-            bx2 = p2[0] - c2x * (t2-t1)/3
-            by2 = p2[1] - c2y * (t2-t1)/3
-            return (bx1, by1, bx2, by2)
-
-        if closed:
-            pts = [points[-1]] + points + [points[0], points[1]]
-        else:
-            pts = [points[0]] + points + [points[-1]]
-
-        d = f"M {pts[1][0]:.4f},{pts[1][1]:.4f}"
-        for i in range(1, len(pts)-2):
-            bx1, by1, bx2, by2 = catmull_to_bezier(pts[i-1], pts[i], pts[i+1], pts[i+2])
-            ex, ey = pts[i+1]
-            d += f" C {bx1:.4f},{by1:.4f} {bx2:.4f},{by2:.4f} {ex:.4f},{ey:.4f}"
-        if closed:
-            d += " Z"
-        return d
 
     # ── pre-scan: bbox + used layers + attr cache (single pass) ─────────────
 
