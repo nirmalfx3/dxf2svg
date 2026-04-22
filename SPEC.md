@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-19 · v1.4 — INSERT placement fixes (base_point, matrix order, arc angle sign); entity-level color (true_color + ACI override); text alignment (align_point, h_align/v_align → SVG text-anchor); full ACI-255 color table; test suite added
+> **Revision:** 2026-04-22 · v1.5 — ACI 7 → black; text height cap (15% of geometry shorter dim); geometry-only viewBox; MTEXT multi-line tspan; text no CSS class; entity color; text alignment
 
 ---
 
@@ -148,6 +148,7 @@ cfg = BuildConfig(
 | `symbol_mode` | `bool` | `False` | Wrap geometry in `<symbol id="...">` instead of root `<svg>`. Used by `symbol_library()`. |
 | `symbol_id` | `str` | `"symbol"` | XML `id` for the `<symbol>` element. Used when `symbol_mode=True`. |
 | `font_family` | `str` | `"monospace"` | CSS `font-family` for `<text>` elements. |
+| `max_text_height_fraction` | `Optional[float]` | `0.15` | Cap `font-size` at this fraction of the geometry's shorter viewBox dimension. Prevents oversized DXF text from obscuring symbol geometry. `None` = no cap (exact DXF height). |
 
 ### Output Size
 
@@ -606,6 +607,7 @@ results = conv.symbol_library(
 | Attributed INSERTs | ATTRIB entities are extracted only when they behave like standard TEXT entities. |
 | Linked XREFs | External references (XREFs) are not resolved. |
 | MTEXT entity color | MTEXT color overrides are stripped with rich formatting; only the entity-level `true_color`/ACI is preserved. |
+| MTEXT API (ezdxf 1.x) | `plain_mtext()` was removed in ezdxf 1.0. The extractor calls `plain_text()` with an `AttributeError` fallback (`getattr(e.dxf, "text", "")`) for any build variation. |
 
 ---
 
@@ -631,9 +633,15 @@ results = conv.symbol_library(
 
 10. **Arc angle convention.** `ExtArc.start_angle` and `end_angle` are in world-space degrees after all parent transforms are applied. The rotation contribution from `_rotation_from_matrix(m)` is added to the block-local angles. In ezdxf's row-vector rotation matrix, `m[1,0] = −sin θ`; the extractor negates this to correctly recover `sin θ` → `atan2(sin, cos) = +θ`.
 
-11. **Entity-level color resolution.** `_entity_rgb(entity)` returns `(R, G, B)` or `None` using AutoCAD priority order: (1) `true_color` group code 420 — 24-bit explicit RGB, always wins; (2) `color` group code 62 ACI 1–255 — looked up in `_ACI_TABLE` (full `DXF_DEFAULT_COLORS` covering all 255 ACI values, normalised to dict at import time to handle both list and dict ezdxf API variants); (3) 256/BYLAYER or 0/BYBLOCK → return `None` (caller uses layer colour). LWPOLYLINE/POLYLINE propagate the parent entity's color to their virtual LINE/ARC children via a `color_override` parameter. In `SVGBuilder._apply_attrs()`, a non-`None` color adds an inline `stroke="#{RR}{GG}{BB}"` that overrides the layer CSS class stroke.
+11. **Entity-level color resolution.** `_entity_rgb(entity)` returns `(R, G, B)` or `None` using AutoCAD priority order: (1) `true_color` group code 420 — 24-bit explicit RGB, always wins; (2) `color` group code 62 ACI 1–255 — looked up in `_ACI_TABLE` (full `DXF_DEFAULT_COLORS` covering all 255 ACI values, normalised to dict at import time); (3) 256/BYLAYER or 0/BYBLOCK → return `None` (caller uses layer colour). LWPOLYLINE/POLYLINE propagate the parent entity's color to their virtual LINE/ARC children via a `color_override` parameter. In `SVGBuilder._apply_attrs()`, a non-`None` color adds an inline `stroke="#{RR}{GG}{BB}"` that overrides the layer CSS class stroke. **ACI 7 special case:** ezdxf's built-in table stores ACI 7 as `0xFFFFFF` (white — AutoCAD dark-background convention). `_ACI_TABLE[7]` is patched to `0x000000` (black) at import time so that entities and layers with the "default" ACI color render visibly on SVG's white canvas instead of appearing as invisible white shapes that cover underlying geometry.
 
 12. **Text alignment.** `ExtText` carries `h_align` (DXF group code 72) and `v_align` (group code 73). For center (1), right (2), aligned (3), middle (4), or fit (5) horizontal alignment, the visual anchor is `align_point` (group code 11), not `insert` (group code 10) — the extractor switches to `align_point` for these modes. `SVGBuilder` maps `h_align` → SVG `text-anchor` (`middle` for 1/4, `end` for 2; `start` is the SVG default and is not emitted). `v_align` → `dominant-baseline` (`central` for middle=2, `hanging` for top=3; baseline/bottom use the SVG auto default).
+
+13. **Text height capping.** The SVG viewBox is determined by **non-text geometry only** (lines, circles, arcs, polylines). Text anchor points are tracked separately and only used as the viewBox fallback when no geometry exists. Then, `SVGBuilder._svg_text()` caps `font-size` at `min(char_height, shorter_padded_dim × max_text_height_fraction)`. The default fraction is **0.15** (15%), controlled by `BuildConfig.max_text_height_fraction` (`None` disables the cap entirely). This prevents DXF text that was designed for a full-drawing context (large char_height relative to the block's geometric footprint) from creating giant glyph shapes that obscure the symbol geometry.
+
+14. **Multi-line MTEXT rendering.** When `ExtText.text` contains newlines, `SVGBuilder._svg_text()` emits `<tspan>` child elements — one per line — instead of setting `el.text` directly. Each `<tspan>` gets `x=` (same as parent anchor) and `dy="0"` for the first line / `dy="1.5em"` for subsequent lines (approximates DXF MTEXT default line spacing of 1.667×). Empty lines receive a non-breaking space (`\u00a0`) so they preserve vertical rhythm. Single-line text is set as `el.text` directly (no `<tspan>` wrapper).
+
+15. **`<text>` elements omit CSS layer class.** `SVGBuilder._svg_text()` does **not** set `class=` on `<text>` elements. CSS class selectors have higher specificity than presentation attributes, so a `.layer-0 { stroke: #000000 }` rule would override `stroke="none"` and paint unwanted outlines on every glyph. By omitting the class, the inline `fill=` and `stroke="none"` presentation attributes are the final authority on text colour. Lines, circles, arcs, and other geometry elements continue to carry `class="layer-NAME"` normally.
 
 ---
 
@@ -701,7 +709,7 @@ results = conv.symbol_library(
 ### Tests
 
 ```bash
-# Run full test suite (30 tests)
+# Run full test suite (35 tests)
 G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 ```
 
@@ -712,4 +720,4 @@ G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 | `tests/test_insert_placement.py` | INSERT base_point alignment, nested inserts, rotation compound matrix, arc angles in rotated blocks, same-block multi-insert (cycle guard regression) |
 | `tests/test_buildconfig.py` | `preserve_size` field removed, default field values |
 | `tests/test_server.py` | Upload size cap (50 MB), debug mode off, DXF extension + binary-content validation, 413 handler |
-| `tests/test_entity_colors.py` | ACI color override → RGB; true_color override; BYLAYER → `None`; true_color beats ACI; entity color in SVG stroke; BYLAYER uses layer color; LWPOLYLINE color forwarded to children; center/right text uses align_point; h_align/v_align stored; SVG text-anchor middle/end; left text no text-anchor |
+| `tests/test_entity_colors.py` | ACI color override → RGB; true_color override; BYLAYER → `None`; true_color beats ACI; entity color in SVG stroke; BYLAYER uses layer color; LWPOLYLINE color forwarded to children; center/right text uses align_point; h_align/v_align stored; SVG text-anchor middle/end; left text no text-anchor; text has no CSS class; ACI 7 renders dark (not white) on SVG canvas; text entity color in SVG fill; MTEXT renders as `<text>` element; MTEXT multi-line uses `<tspan>`; MTEXT extraction produces ExtText |
