@@ -276,6 +276,76 @@ def test_left_text_no_anchor_in_svg():
         "Left-aligned text should not set text-anchor (SVG default is 'start')"
 
 
+def test_text_has_no_css_class():
+    """
+    <text> elements must NOT carry a CSS layer class.
+
+    In SVG, CSS class selectors have higher specificity than presentation
+    attributes.  If text were assigned class="layer-0" and the stylesheet
+    declared ".layer-0 { stroke: #000000 }", that rule would override the
+    presentation attribute stroke="none", painting unwanted outlines on every
+    glyph and potentially making text invisible against a same-coloured background.
+
+    Lines/circles/arcs continue to use CSS classes normally — only text is exempt.
+    """
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+    msp.add_text("LABEL", dxfattribs={"height": 1.0, "insert": (3.0, 3.0, 0.0)})
+    msp.add_circle(center=(5.0, 5.0, 0.0), radius=1.0)  # gives geometry for bbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        svg = _svg(_save(doc, tmp, "txt_no_class.dxf"))
+
+    import re
+    # Check that no <text> tag has a class= attribute
+    for m in re.finditer(r'<text\b[^>]*/?>|<text\b[^>]*>', svg):
+        tag = m.group(0)
+        assert 'class=' not in tag, \
+            f"<text> element must not carry a CSS layer class; found: {tag}"
+
+    # Geometry elements SHOULD still have a class
+    assert 'class="layer-' in svg, \
+        "Non-text elements must still carry CSS layer classes"
+
+    # Text must still have an explicit fill attribute
+    for m in re.finditer(r'<text\b[^>]*>', svg):
+        tag = m.group(0)
+        assert 'fill=' in tag, \
+            f"<text> element must carry inline fill= since it has no CSS class: {tag}"
+
+
+def test_aci7_layer_renders_dark_not_white():
+    """
+    Layer with ACI 7 (AutoCAD 'white' on dark backgrounds) must NOT produce
+    white fill/stroke in SVG elements — that would be invisible on a white canvas
+    and would appear as white shapes covering the underlying geometry.
+
+    Note: the SVG background <rect fill="white"> is expected and excluded here.
+    We check that geometry/text elements and layer CSS don't use #FFFFFF.
+    """
+    doc = ezdxf.new("R2010")
+    # Layer '0' uses ACI 7 by default.  Add text and a circle to force both
+    # fill and stroke lookups.
+    msp = doc.modelspace()
+    msp.add_text("VISIBLE", dxfattribs={"height": 1.0, "insert": (0.0, 0.0, 0.0)})
+    msp.add_circle(center=(5.0, 5.0, 0.0), radius=1.0)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        svg = _svg(_save(doc, tmp, "aci7.dxf"))
+
+    # The background <rect> has fill="white" (that's correct and expected).
+    # Strip it out before checking so we only evaluate geometry/text elements.
+    svg_no_bg = svg.replace('fill="white"', 'fill="__BG__"')
+
+    assert 'fill="#FFFFFF"' not in svg_no_bg, \
+        "ACI 7: text/geometry fill must not be white (#FFFFFF) — invisible on white SVG"
+    assert 'stroke="#FFFFFF"' not in svg_no_bg, \
+        "ACI 7: geometry stroke must not be white (#FFFFFF) — invisible on white SVG"
+    # The layer CSS must not declare white stroke either.
+    assert "stroke: #FFFFFF" not in svg_no_bg and "stroke: #ffffff" not in svg_no_bg, \
+        "ACI 7: layer CSS must not use white stroke"
+
+
 def test_text_entity_color_in_svg():
     """TEXT with explicit true_color must use that color as fill in SVG."""
     doc = ezdxf.new("R2010")
@@ -290,3 +360,56 @@ def test_text_entity_color_in_svg():
 
     assert "#C86432" in svg or "#c86432" in svg.lower(), \
         "Expected text entity colour #C86432 in SVG fill"
+
+
+# ── MTEXT rendering ───────────────────────────────────────────────────────────
+
+def test_mtext_renders_as_text_element():
+    """MTEXT entity must produce a <text> element in the SVG (not be silently dropped)."""
+    doc = ezdxf.new("R2010")
+    doc.modelspace().add_mtext("SUBARRAY ID", dxfattribs={
+        "insert": (5.0, 10.0, 0.0),
+        "char_height": 2.5,
+    })
+
+    with tempfile.TemporaryDirectory() as tmp:
+        svg = _svg(_save(doc, tmp, "mtext.dxf"))
+
+    assert "<text" in svg, "MTEXT must produce a <text> element in SVG"
+    assert "SUBARRAY ID" in svg, "MTEXT content must appear in SVG"
+
+
+def test_mtext_multiline_uses_tspan():
+    """Multi-line MTEXT must emit <tspan> children — one per line."""
+    doc = ezdxf.new("R2010")
+    doc.modelspace().add_mtext("Line1\nLine2\nLine3", dxfattribs={
+        "insert": (0.0, 0.0, 0.0),
+        "char_height": 2.5,
+    })
+
+    with tempfile.TemporaryDirectory() as tmp:
+        svg = _svg(_save(doc, tmp, "mtext_ml.dxf"))
+
+    assert "<tspan" in svg, "Multi-line MTEXT should use <tspan> elements"
+    assert "Line1" in svg and "Line2" in svg and "Line3" in svg, \
+        "All lines must appear in SVG"
+
+
+def test_mtext_extracted_as_ext_text():
+    """MTEXT entity must produce an ExtText object with correct coordinates."""
+    doc = ezdxf.new("R2010")
+    doc.modelspace().add_mtext("LABEL", dxfattribs={
+        "insert": (3.0, 7.0, 0.0),
+        "char_height": 1.5,
+    })
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ents = _extract(_save(doc, tmp, "mtext_ext.dxf"))
+
+    texts = [e for e in ents if isinstance(e, ExtText)]
+    assert len(texts) == 1, f"Expected 1 ExtText, got {len(texts)}"
+    t = texts[0]
+    assert t.is_mtext is True
+    assert abs(t.x - 3.0) < 0.01, f"MTEXT x should be 3.0, got {t.x}"
+    assert abs(t.y - 7.0) < 0.01, f"MTEXT y should be 7.0, got {t.y}"
+    assert t.text == "LABEL"

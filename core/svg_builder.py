@@ -54,6 +54,11 @@ class BuildConfig:
     stroke_scale: float = 1.0             # Global stroke width multiplier
     font_family: str = "monospace"
     background: Optional[str] = "white"   # None = transparent
+    # Maximum text height as a fraction of the geometry's shorter dimension.
+    # Prevents oversized DXF text (e.g. MTEXT char_height designed for a
+    # full-drawing context) from covering the symbol geometry in thumbnails.
+    # Set to None to disable the cap and render text at its exact DXF height.
+    max_text_height_fraction: Optional[float] = 0.15
 
 
 class SVGBuilder:
@@ -98,6 +103,16 @@ class SVGBuilder:
         vy = min_y - pad_y
         vw = w + 2 * pad_x
         vh = h + 2 * pad_y
+
+        # Store for font-size capping in _svg_text().
+        # When geometry exists, cap text at max_text_height_fraction of the
+        # shorter padded viewBox dimension so large DXF text doesn't obscure
+        # the symbol.  When there is no non-text geometry (_has_geometry=False),
+        # no cap is applied (text IS the content in that case).
+        if getattr(self, '_has_geometry', True) and self.cfg.max_text_height_fraction:
+            self._geom_shorter_dim = max(min(vw, vh), 1e-6)
+        else:
+            self._geom_shorter_dim = None
 
         # Output dimensions: 1:1 with DXF physical coordinates (which are in inches).
         # width/height are always expressed in "in" units so any SVG viewer renders
@@ -277,7 +292,18 @@ class SVGBuilder:
     def _svg_text(self, e: ExtText) -> ET.Element:
         el = ET.Element("text")
         el.set("x", f"{e.x:.4f}"); el.set("y", f"{e.y:.4f}")
-        el.set("font-size", f"{e.height:.4f}")
+
+        # Cap font-size when non-text geometry is present.  DXF char_height can
+        # be disproportionately large relative to a block's geometric footprint
+        # (e.g. MTEXT designed for a full-drawing context dropped into a small
+        # symbol block).  Capping at a fraction of the geometry's shorter dim
+        # keeps text readable without it dominating or obscuring the symbol.
+        geom_dim = getattr(self, '_geom_shorter_dim', None)
+        if geom_dim is not None and self.cfg.max_text_height_fraction:
+            font_size = min(e.height, geom_dim * self.cfg.max_text_height_fraction)
+        else:
+            font_size = e.height
+        el.set("font-size", f"{font_size:.4f}")
         el.set("font-family", self.cfg.font_family)
 
         # Map DXF halign → SVG text-anchor so centered/right text lands
@@ -304,12 +330,35 @@ class SVGBuilder:
             el.set("transform", f"{cur} {flip}".strip())
 
         # Colour: entity override wins over layer colour.
+        # IMPORTANT: text does NOT receive a CSS layer class.
+        # In SVG, CSS class selectors have higher specificity than presentation
+        # attributes, so a rule like ".layer-0 { stroke: #000000 }" would override
+        # our stroke="none" presentation attribute and paint unwanted outlines on
+        # every glyph.  By omitting the class, we ensure the fill and stroke
+        # presentation attributes below are the final authority on text appearance.
+        # Lines, circles, arcs etc. continue to use CSS classes normally.
         attrs = self._layer_attr_cache.get(e.layer) or self._layer_attrs(e.layer)
-        el.set("class", attrs["class"])
         fill = "#{:02X}{:02X}{:02X}".format(*e.color) if e.color is not None else attrs["stroke"]
         el.set("fill", fill)
         el.set("stroke", "none")
-        el.text = e.text
+
+        # Multi-line text: split on any line ending and emit <tspan> children
+        # so each line is independently positioned.  Single-line text is set
+        # directly as element text (avoids an unnecessary <tspan> wrapper).
+        lines = (e.text or "").splitlines()
+        if not lines:
+            lines = [""]
+        if len(lines) == 1:
+            el.text = lines[0]
+        else:
+            for i, line in enumerate(lines):
+                tspan = ET.SubElement(el, "tspan")
+                tspan.set("x", f"{e.x:.4f}")
+                # First tspan: no dy offset (starts at the element's y baseline).
+                # Subsequent tspans: 1.5em line advance (matches DXF default
+                # MTEXT line spacing of 1.6667× at factor=1.0, approx as 1.5em).
+                tspan.set("dy", "0" if i == 0 else "1.5em")
+                tspan.text = line if line else "\u00a0"   # NBSP keeps empty lines
         return el
 
     def _svg_solid(self, e: ExtSolid) -> ET.Element:
@@ -355,14 +404,23 @@ class SVGBuilder:
     def _pre_scan(self):
         """
         Single pass over entities that computes:
-          1. Bounding box (min/max x,y) — incremental, no coordinate lists
-          2. Used layer names set
-          3. Layer attribute cache (dict per layer, pre-computed once)
+          1. Geometry bounding box (min/max x,y) — text anchor points excluded so
+             that oversized DXF text does not inflate the viewBox scale.
+          2. Text-anchor fallback bbox — used only when there is no non-text geometry
+             (e.g. text-only test SVGs).
+          3. Used layer names set + layer attribute cache (pre-computed once).
 
-        Returns (min_x, min_y, max_x, max_y) or None if no geometry found.
+        Sets self._has_geometry so _svg_text can decide whether to apply the
+        max_text_height_fraction cap.
+
+        Returns (min_x, min_y, max_x, max_y) or None if no entities found.
         """
+        # Geometry bbox (lines, circles, arcs, polylines…)
         min_x = min_y = float("inf")
         max_x = max_y = float("-inf")
+        # Text-anchor fallback: only used when there is no non-text geometry
+        txt_min_x = txt_min_y = float("inf")
+        txt_max_x = txt_max_y = float("-inf")
         used: set = set()
 
         for e in self._entities:
@@ -393,19 +451,31 @@ class SVGBuilder:
                         if py < min_y: min_y = py
                         if py > max_y: max_y = py
                 elif t == "ExtText":
-                    if e.x < min_x: min_x = e.x
-                    if e.x > max_x: max_x = e.x
-                    if e.y < min_y: min_y = e.y
-                    if e.y > max_y: max_y = e.y
+                    # Text anchor points do NOT enter the geometry bbox.
+                    # They are stored separately and used only as a fallback
+                    # when the drawing has no non-text geometry at all.
+                    if e.x < txt_min_x: txt_min_x = e.x
+                    if e.x > txt_max_x: txt_max_x = e.x
+                    if e.y < txt_min_y: txt_min_y = e.y
+                    if e.y > txt_max_y: txt_max_y = e.y
             except Exception:
                 pass
 
         self._used_layers = used
         self._layer_attr_cache = {name: self._layer_attrs(name) for name in used}
 
-        if min_x == float("inf"):
-            return None
-        return min_x, min_y, max_x, max_y
+        if min_x != float("inf"):
+            # Normal case: geometry found → geometry drives the viewBox.
+            self._has_geometry = True
+            return min_x, min_y, max_x, max_y
+
+        if txt_min_x != float("inf"):
+            # Text-only content (e.g. test SVGs with just TEXT/MTEXT).
+            # No geometry-based cap is applied in this case.
+            self._has_geometry = False
+            return txt_min_x, txt_min_y, txt_max_x, txt_max_y
+
+        return None
 
     # ── CSS generation ───────────────────────────────────────────────────────
 

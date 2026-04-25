@@ -27,11 +27,16 @@ logger = logging.getLogger(__name__)
 try:
     from ezdxf.colors import DXF_DEFAULT_COLORS as _raw_aci
     if isinstance(_raw_aci, dict):
-        _ACI_TABLE: dict = _raw_aci
+        _ACI_TABLE: dict = dict(_raw_aci)   # copy so we can patch safely
     else:                               # list — index is the ACI value
         _ACI_TABLE = {i: v for i, v in enumerate(_raw_aci) if v}
 except ImportError:
     _ACI_TABLE: dict = {}
+
+# ACI 7 in ezdxf's built-in table is 0xFFFFFF (white — AutoCAD uses this for
+# its dark model-space background).  SVG output defaults to a white canvas, so
+# white text/lines would be invisible.  Remap ACI 7 → black for SVG output.
+_ACI_TABLE[7] = 0x000000
 
 # ─────────────────────────────────────────────
 # Data classes — geometry carriers
@@ -421,8 +426,14 @@ class DXFExtractor:
     def _handle_text(self, e, m, is_mtext=False):
         if is_mtext:
             insert = e.dxf.insert
-            text = e.plain_mtext()
-            height = e.dxf.get("char_height", 2.5)
+            # ezdxf 1.x: plain_text() strips inline MTEXT formatting codes.
+            # (The older plain_mtext() alias was removed in ezdxf 1.0.)
+            try:
+                text = e.plain_text()
+            except AttributeError:
+                # Defensive fallback for any ezdxf build variation
+                text = getattr(e.dxf, "text", "") or ""
+            height = e.dxf.get("char_height", 2.5) or 2.5  # guard against stored 0
             rotation = e.dxf.get("rotation", 0.0)
             h_align = 0
             v_align = 0
