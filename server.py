@@ -173,6 +173,14 @@ def list_blocks():
 
 
 if __name__ == "__main__":
+    # DX-FH-005: configure root logger here (entry-point), not inside
+    # DXFConverter.__init__.  This keeps embedding apps (ELiGen) in control
+    # of their own logging setup.
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(levelname)s] %(name)s: %(message)s",
+    )
     print("\n  DXF -> SVG Converter")
     print("  ---------------------")
     print("  Open:  http://localhost:5000")

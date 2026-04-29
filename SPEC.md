@@ -1,6 +1,6 @@
 # dxf2svg — Product Specification
 
-> **Revision:** 2026-04-22 · v1.5 — ACI 7 → black; text height cap (15% of geometry shorter dim); geometry-only viewBox; MTEXT multi-line tspan; text no CSS class; entity color; text alignment
+> **Revision:** 2026-04-29 · v1.6 — ACI 7 remapped black (was white — AutoCAD dark-bg convention); text height cap (15% geometry shorter dim, `max_text_height_fraction`); geometry-only viewBox; MTEXT support (`plain_text()`, multiline `<tspan>`); `<text>` omits CSS class (SVG specificity fix); UI escapes DXF metadata (DX-SEC-005); root-logger fix (DX-FH-005); CI workflow added.
 
 ---
 
@@ -243,7 +243,7 @@ conv = DXFConverter(dxf_path, unfold_all_layers=True, log_level=logging.INFO)
 |-----------|------|---------|-------------|
 | `dxf_path` | `str` | required | Absolute or relative path to the `.dxf` file |
 | `unfold_all_layers` | `bool` | `True` | Traverse frozen/locked/off layers. Set `False` to respect layer visibility. |
-| `log_level` | `int` | `logging.INFO` | Python logging level |
+| `log_level` | `int` | `logging.INFO` | Sets the level of the `dxf2svg.converter` logger. Does **not** call `logging.basicConfig` — the embedding application owns root-logger configuration (DX-FH-005). |
 
 ---
 
@@ -709,7 +709,7 @@ results = conv.symbol_library(
 ### Tests
 
 ```bash
-# Run full test suite (35 tests)
+# Run full test suite (41 tests)
 G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 ```
 
@@ -721,3 +721,5 @@ G:/dxf2svg/.venv/Scripts/pytest tests/ -v
 | `tests/test_buildconfig.py` | `preserve_size` field removed, default field values |
 | `tests/test_server.py` | Upload size cap (50 MB), debug mode off, DXF extension + binary-content validation, 413 handler |
 | `tests/test_entity_colors.py` | ACI color override → RGB; true_color override; BYLAYER → `None`; true_color beats ACI; entity color in SVG stroke; BYLAYER uses layer color; LWPOLYLINE color forwarded to children; center/right text uses align_point; h_align/v_align stored; SVG text-anchor middle/end; left text no text-anchor; text has no CSS class; ACI 7 renders dark (not white) on SVG canvas; text entity color in SVG fill; MTEXT renders as `<text>` element; MTEXT multi-line uses `<tspan>`; MTEXT extraction produces ExtText |
+| `tests/test_logging.py` | Root-logger isolation (DX-FH-005): `DXFConverter.__init__` must not call `logging.basicConfig`; module logger level set correctly |
+| `tests/test_ui_security.py` | Upload endpoint rejects non-`.dxf` extensions; rejects binary content (DX-SEC-005); accepts valid DXF; error response is JSON not HTML |

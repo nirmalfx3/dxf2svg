@@ -37,10 +37,13 @@ class DXFConverter:
         unfold_all_layers: bool = True,
         log_level: int = logging.INFO,
     ):
-        logging.basicConfig(
-            level=log_level,
-            format="[%(levelname)s] %(name)s: %(message)s"
-        )
+        # DX-FH-005: do NOT call logging.basicConfig here.  A library configuring
+        # the root logger silently overrides the embedding application's logging
+        # setup (ELiGen creates a new DXFConverter for every symbol render).
+        # Entry points (cli.py, server.py) configure logging instead.
+        # log_level is retained for API compat but only sets this module's logger.
+        if log_level is not None:
+            logger.setLevel(log_level)
         self.dxf_path = dxf_path
         self.extractor = DXFExtractor(dxf_path, unfold_all_layers=unfold_all_layers)
         self.last_entity_count: int = 0

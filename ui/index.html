@@ -776,6 +776,13 @@ function toggleTheme() {
   }
 })();
 
+// ── HTML escape helper (DX-SEC-005) ───────────────────────────────────────────
+// DXF block names, layer names, and entity-type strings reach the browser via
+// the JSON response from /api/convert and are rendered into innerHTML below.
+// Always pass attacker-controllable strings through esc() before interpolation.
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let state = {
   file: null,
@@ -1009,9 +1016,9 @@ function renderAudit(audit) {
   let html = '';
   for (const [bname, counts] of Object.entries(audit.blocks || {})) {
     html += `<div class="audit-block">
-      <div class="audit-block-name">${bname}</div>`;
+      <div class="audit-block-name">${esc(bname)}</div>`;
     for (const [etype, cnt] of Object.entries(counts)) {
-      html += `<div class="audit-entity-row"><span>${etype}</span><span>${cnt}</span></div>`;
+      html += `<div class="audit-entity-row"><span>${esc(etype)}</span><span>${cnt | 0}</span></div>`;
     }
     html += '</div>';
   }
@@ -1023,13 +1030,12 @@ function renderLayers(layers) {
   const el = document.getElementById('layerList');
   let html = '';
   for (const [name, info] of Object.entries(layers)) {
-    const color = info.rgb
-      ? `rgb(${info.rgb[0]},${info.rgb[1]},${info.rgb[2]})`
-      : '#888';
+    const rgb = Array.isArray(info.rgb) ? info.rgb.map(n => n | 0) : null;
+    const color = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : '#888';
     html += `<div class="layer-chip">
       <div class="layer-swatch" style="background:${color}"></div>
-      <span style="color:var(--text)">${name}</span>
-      <span style="margin-left:auto; color:var(--text-dim)">${info.linetype}</span>
+      <span style="color:var(--text)">${esc(name)}</span>
+      <span style="margin-left:auto; color:var(--text-dim)">${esc(info.linetype || '')}</span>
     </div>`;
   }
   el.innerHTML = html;
